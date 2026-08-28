@@ -1121,7 +1121,7 @@ export class CosmicMotionApp {
 
     // Earth past trajectory — thin purple thread
     if (pastPts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(pastPts);
+      const curve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
       const segs = Math.min(pastPts.length * 4, 512);
       const geo = new THREE.TubeGeometry(curve, segs, 0.03, 6, false);
       this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
@@ -1130,7 +1130,8 @@ export class CosmicMotionApp {
       }));
       this.scene.add(this.trajectoryMesh);
 
-      const glowGeo = new THREE.TubeGeometry(curve, segs, 0.12, 6, false);
+      const glowCurve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
+      const glowGeo = new THREE.TubeGeometry(glowCurve, segs, 0.12, 6, false);
       this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x7c4dff, transparent: true, opacity: 0.04,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -1140,7 +1141,7 @@ export class CosmicMotionApp {
 
     // Earth future trajectory — thin cyan thread
     if (futurePts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(futurePts);
+      const curve = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
       const segsF = Math.min(futurePts.length * 4, 512);
       const geo = new THREE.TubeGeometry(curve, segsF, 0.04, 6, false);
       this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
@@ -1149,7 +1150,8 @@ export class CosmicMotionApp {
       }));
       this.scene.add(this.trajectoryForwardMesh);
 
-      const glowGeo = new THREE.TubeGeometry(curve, segsF, 0.15, 6, false);
+      const glowCurveF = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
+      const glowGeo = new THREE.TubeGeometry(glowCurveF, segsF, 0.15, 6, false);
       this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x00bcd4, transparent: true, opacity: 0.05,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -1178,7 +1180,7 @@ export class CosmicMotionApp {
 
     // Sun past trajectory — single warm golden line
     if (sunPastPts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(sunPastPts);
+      const curve = new THREE.CatmullRomCurve3(sunPastPts, false, 'centripetal');
       const geo = new THREE.TubeGeometry(curve, Math.min(sunPastPts.length * 2, 256), 0.04, 6, false);
       this.sunTrajectoryPast = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0xffa726, transparent: true, opacity: 0.15,
@@ -1189,7 +1191,7 @@ export class CosmicMotionApp {
 
     // Sun future trajectory — single warm golden line
     if (sunFuturePts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(sunFuturePts);
+      const curve = new THREE.CatmullRomCurve3(sunFuturePts, false, 'centripetal');
       const geo = new THREE.TubeGeometry(curve, Math.min(sunFuturePts.length * 2, 256), 0.05, 6, false);
       this.sunTrajectoryFuture = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0xffcc00, transparent: true, opacity: 0.2,

@@ -111,16 +111,16 @@ export function computeSceneData(
   const trajectory: TrajectoryPoint[] = [];
   const dayOffsets: number[] = [];
 
-  // Build adaptive sample schedule
-  // ±7 days: every 6 hours | ±30d: daily | ±365d: every 3 days | ±3650d: every 10d | beyond: every 30d
+  // Build adaptive sample schedule — dense near "now", sparser far out
   for (let d = -daysRange; d <= daysRange;) {
     dayOffsets.push(d);
     const abs = Math.abs(d);
-    if (abs < 7) d += 0.25;
-    else if (abs < 30) d += 1;
-    else if (abs < 365) d += 3;
-    else if (abs < 3650) d += 10;
-    else d += 30;
+    if (abs < 2) d += 0.125;       // ±2 days: every 3 hours (smooth junction)
+    else if (abs < 14) d += 0.5;   // ±2 weeks: every 12 hours
+    else if (abs < 60) d += 1;     // ±2 months: daily
+    else if (abs < 365) d += 3;    // ±1 year: every 3 days
+    else if (abs < 3650) d += 10;  // ±10 years: every 10 days
+    else d += 30;                  // beyond: monthly
   }
   if (dayOffsets[dayOffsets.length - 1] < daysRange) dayOffsets.push(daysRange);
 
