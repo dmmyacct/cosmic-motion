@@ -846,10 +846,14 @@ export class CosmicMotionApp {
     const moonLabelPos = moonPos.clone();
     moonLabelPos.y += EARTH_R * 0.7;
     this.moonDistLabel.position.copy(moonLabelPos);
-    const illumPct = ((1 + Math.cos(phaseAngle)) / 2 * 100).toFixed(0);
+    const phaseDeg = phaseAngle * 180 / Math.PI;
+    const phaseName = phaseDeg > 175 ? 'New' : phaseDeg < 5 ? 'Full'
+      : moonPhaseWaxing
+        ? (phaseDeg > 95 ? 'Wax. Crescent' : phaseDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
+        : (phaseDeg < 85 ? 'Wan. Gibbous' : phaseDeg < 95 ? '3rd Quarter' : 'Wan. Crescent');
     this.updateDistLabel(
       this.moonDistLabel,
-      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km  ·  ${illumPct}%`,
+      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km  ·  ${phaseName}`,
       'rgba(220, 220, 215, 0.8)',
     );
 
