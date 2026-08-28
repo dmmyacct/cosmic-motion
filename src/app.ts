@@ -1109,69 +1109,40 @@ export class CosmicMotionApp {
 
     const pts = this.data.trajectory;
 
-    // Build ONE continuous curve from all trajectory points, then uniformly sample
-    // and split at "now" for color. This ensures perfectly smooth tangents everywhere.
-    const allPts: THREE.Vector3[] = [];
-    let nowIndex = 0;
-    for (let i = 0; i < pts.length; i++) {
-      allPts.push(eclToThree(pts[i].pos).multiplyScalar(AU_TO_SCENE));
-      if (pts[i].dayOffset <= 0) nowIndex = i;
+    // Use the raw computed trajectory points directly — they ARE the true path.
+    // Split at "now" for past/future coloring. Use simple line geometry, not tubes
+    // with spline fitting, which was destroying the helical detail.
+    const pastPts: THREE.Vector3[] = [];
+    const futurePts: THREE.Vector3[] = [];
+
+    for (const pt of pts) {
+      const v = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
+      if (pt.dayOffset <= 0.01) pastPts.push(v.clone());
+      if (pt.dayOffset >= -0.01) futurePts.push(v);
     }
 
-    if (allPts.length >= 4) {
-      const masterCurve = new THREE.CatmullRomCurve3(allPts, false, 'centripetal');
+    if (pastPts.length >= 2) {
+      const geo = new THREE.BufferGeometry().setFromPoints(pastPts);
+      this.trajectoryMesh = new THREE.Mesh(); // placeholder — using Line instead
+      this.trajectoryGlowPast = new THREE.Mesh();
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: 0x9c6dff, transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      this.scene.add(line);
+      this.trajectoryMesh = line as unknown as THREE.Mesh;
+    }
 
-      // Uniformly sample the master curve
-      const totalSamples = 1024;
-      const sampled = masterCurve.getSpacedPoints(totalSamples);
-
-      // Find the sample closest to "now" (origin)
-      let splitIdx = 0;
-      let minDist = Infinity;
-      for (let i = 0; i < sampled.length; i++) {
-        const d = sampled[i].lengthSq();
-        if (d < minDist) { minDist = d; splitIdx = i; }
-      }
-
-      // Past: samples 0..splitIdx (inclusive, with 1 overlap for continuity)
-      const pastPts = sampled.slice(0, splitIdx + 1);
-      const futurePts = sampled.slice(splitIdx);
-
-      if (pastPts.length >= 2) {
-        const pastCurve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
-        const segs = Math.min(256, pastPts.length);
-        const geo = new THREE.TubeGeometry(pastCurve, segs, 0.03, 6, false);
-        this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-          color: 0x9c6dff, transparent: true, opacity: 0.35,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }));
-        this.scene.add(this.trajectoryMesh);
-
-        const glowGeo = new THREE.TubeGeometry(pastCurve, segs, 0.12, 6, false);
-        this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-          color: 0x7c4dff, transparent: true, opacity: 0.04,
-          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-        }));
-        this.scene.add(this.trajectoryGlowPast);
-      }
-
-      if (futurePts.length >= 2) {
-        const futureCurve = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
-        const segsF = Math.min(256, futurePts.length);
-        const geo = new THREE.TubeGeometry(futureCurve, segsF, 0.04, 6, false);
-        this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-          color: 0x00e5ff, transparent: true, opacity: 0.45,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }));
-        this.scene.add(this.trajectoryForwardMesh);
-
-        const glowGeo = new THREE.TubeGeometry(futureCurve, segsF, 0.15, 6, false);
-        this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-          color: 0x00bcd4, transparent: true, opacity: 0.05,
-          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-        }));
-        this.scene.add(this.trajectoryGlowFuture);
-      }
+    if (futurePts.length >= 2) {
+      const geo = new THREE.BufferGeometry().setFromPoints(futurePts);
+      this.trajectoryForwardMesh = new THREE.Mesh();
+      this.trajectoryGlowFuture = new THREE.Mesh();
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: 0x00e5ff, transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      this.scene.add(line);
+      this.trajectoryForwardMesh = line as unknown as THREE.Mesh;
     }
 
     // Sun trajectory — straight line through the primary Sun in galactic direction.
