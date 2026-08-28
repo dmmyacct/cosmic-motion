@@ -13,6 +13,8 @@ export interface UIUpdateData {
   solarGalacticSpeedKmS: number;
   sunDistAU: number;
   moonDistKm: number;
+  moonPhaseAngle: number;
+  moonPhaseWaxing: boolean;
   obliquity: number;
   rotationAngle: number;
   date: Date;
@@ -54,6 +56,37 @@ function fmtLightTime(km: number): string {
   const min = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
   return `${min}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function moonPhaseName(angleRad: number, waxing: boolean): string {
+  const deg = angleRad * 180 / Math.PI;
+  if (deg < 5) return 'Full Moon';
+  if (deg > 175) return 'New Moon';
+  if (waxing) {
+    if (deg > 95) return 'Waxing Crescent';
+    if (deg > 85) return 'First Quarter';
+    return 'Waxing Gibbous';
+  } else {
+    if (deg < 85) return 'Waning Gibbous';
+    if (deg < 95) return 'Last Quarter';
+    return 'Waning Crescent';
+  }
+}
+
+function moonIllumination(angleRad: number): number {
+  return (1 + Math.cos(angleRad)) / 2;
+}
+
+function moonPhaseEmoji(angleRad: number, waxing: boolean): string {
+  const deg = angleRad * 180 / Math.PI;
+  if (deg > 175) return '🌑';
+  if (deg > 95 && waxing) return '🌒';
+  if (deg >= 85 && deg <= 95 && waxing) return '🌓';
+  if (deg < 85 && waxing) return '🌔';
+  if (deg < 5) return '🌕';
+  if (deg < 85 && !waxing) return '🌖';
+  if (deg >= 85 && deg <= 95 && !waxing) return '🌗';
+  return '🌘';
 }
 
 const PLAY_SPEEDS = [
@@ -107,6 +140,8 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
             <span class="cm-body-icon cm-moon-icon">☽</span> Moon
           </div>
           <div class="cm-body-stats">
+            <div class="cm-stat"><span class="cm-stat-label">Phase</span><span class="cm-stat-value cm-moon-phase">🌕 Full Moon</span></div>
+            <div class="cm-stat"><span class="cm-stat-label">Illumination</span><span class="cm-stat-value cm-moon-illum">100%</span></div>
             <div class="cm-stat"><span class="cm-stat-label">Distance</span><span class="cm-stat-value cm-moon-dist">384,400 km</span></div>
             <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-moon-light">1.3s</span></div>
           </div>
@@ -128,6 +163,8 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const earthOrbitalSpeed = panel.querySelector('.cm-earth-orbital-speed')!;
   const earthRotSpeed = panel.querySelector('.cm-earth-rotation-speed')!;
   const earthTilt = panel.querySelector('.cm-earth-tilt')!;
+  const moonPhase = panel.querySelector('.cm-moon-phase')!;
+  const moonIllum = panel.querySelector('.cm-moon-illum')!;
   const moonDist = panel.querySelector('.cm-moon-dist')!;
   const moonLight = panel.querySelector('.cm-moon-light')!;
 
@@ -280,6 +317,10 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       earthTilt.textContent = `${(data.obliquity * 180 / Math.PI).toFixed(2)}°`;
 
       // Moon
+      const phaseAngle = data.moonPhaseAngle;
+      const waxing = data.moonPhaseWaxing;
+      moonPhase.textContent = `${moonPhaseEmoji(phaseAngle, waxing)} ${moonPhaseName(phaseAngle, waxing)}`;
+      moonIllum.textContent = `${(moonIllumination(phaseAngle) * 100).toFixed(1)}%`;
       moonDist.textContent = fmtDist(data.moonDistKm);
       moonLight.textContent = fmtLightTime(data.moonDistKm);
     },

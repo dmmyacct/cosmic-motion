@@ -832,6 +832,13 @@ export class CosmicMotionApp {
       'rgba(255, 230, 160, 0.85)',
     );
 
+    // Moon phase: angle between Sun and Moon as seen from Earth
+    const sunV = new THREE.Vector3(...this.data.sunDir);
+    const moonV = new THREE.Vector3(...this.data.moonDir);
+    const phaseAngle = sunV.angleTo(moonV);
+    const cross = new THREE.Vector3().crossVectors(sunV, moonV);
+    const moonPhaseWaxing = cross.z > 0;
+
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
@@ -839,9 +846,10 @@ export class CosmicMotionApp {
     const moonLabelPos = moonPos.clone();
     moonLabelPos.y += EARTH_R * 0.7;
     this.moonDistLabel.position.copy(moonLabelPos);
+    const illumPct = ((1 + Math.cos(phaseAngle)) / 2 * 100).toFixed(0);
     this.updateDistLabel(
       this.moonDistLabel,
-      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km`,
+      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km  ·  ${illumPct}%`,
       'rgba(220, 220, 215, 0.8)',
     );
 
@@ -860,6 +868,8 @@ export class CosmicMotionApp {
       solarGalacticSpeedKmS: this.data.solarGalacticSpeedKmS,
       sunDistAU: this.data.sunDistAU,
       moonDistKm: this.data.moonDistKm,
+      moonPhaseAngle: phaseAngle,
+      moonPhaseWaxing,
       obliquity: this.data.obliquity,
       rotationAngle: this.data.rotationAngle,
       date: new Date(),
