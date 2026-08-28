@@ -107,6 +107,8 @@ canvas { display: block; }
 .cm-sun-section > .cm-body-header { color: rgba(255, 210, 100, 0.85); }
 .cm-earth-section > .cm-body-header { color: rgba(100, 200, 255, 0.8); }
 .cm-moon-section > .cm-body-header { color: rgba(200, 200, 195, 0.7); }
+.cm-loc-section > .cm-body-header { color: rgba(0, 255, 136, 0.7); }
+.cm-loc-icon { font-size: 10px; }
 
 .cm-body-stats { margin-bottom: 8px; }
 
@@ -122,6 +124,10 @@ canvas { display: block; }
   border-left: 1px solid rgba(255, 255, 255, 0.06);
   margin-left: 6px;
   margin-top: 6px;
+}
+
+.cm-loc-section {
+  margin-top: 8px;
 }
 
 .cm-stat {

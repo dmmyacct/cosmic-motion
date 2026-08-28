@@ -22,6 +22,12 @@ export interface UIUpdateData {
   ghostDate?: Date;
   ghostSunDistAU?: number;
   ghostMoonDistKm?: number;
+  locLatStr?: string;
+  locLonStr?: string;
+  locLocalTime?: string;
+  locSunset?: string;
+  locIsDefault?: boolean;
+  locVisible?: boolean;
 }
 
 const AU_KM = 149597870.7;
@@ -152,6 +158,17 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
             <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-moon-light">1.3s</span></div>
           </div>
         </div>
+
+        <div class="cm-body-section cm-loc-section">
+          <div class="cm-body-header">
+            <span class="cm-body-icon cm-loc-icon">📍</span> You
+          </div>
+          <div class="cm-body-stats">
+            <div class="cm-stat"><span class="cm-stat-label">Position</span><span class="cm-stat-value cm-loc-coords">—</span></div>
+            <div class="cm-stat"><span class="cm-stat-label">Local time</span><span class="cm-stat-value cm-loc-time">—</span></div>
+            <div class="cm-stat"><span class="cm-stat-label">Sunset</span><span class="cm-stat-value cm-loc-sunset">—</span></div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -173,6 +190,10 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const moonIllum = panel.querySelector('.cm-moon-illum')!;
   const moonDist = panel.querySelector('.cm-moon-dist')!;
   const moonLight = panel.querySelector('.cm-moon-light')!;
+  const locSection = panel.querySelector('.cm-loc-section') as HTMLElement;
+  const locCoords = panel.querySelector('.cm-loc-coords')!;
+  const locTime = panel.querySelector('.cm-loc-time')!;
+  const locSunset = panel.querySelector('.cm-loc-sunset')!;
 
   // ── Bottom: time controls ──
   const timePanel = document.createElement('div');
@@ -336,6 +357,17 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       moonIllum.textContent = `${(moonIllumination(phaseAngle) * 100).toFixed(1)}%`;
       moonDist.textContent = fmtDist(data.moonDistKm);
       moonLight.textContent = fmtLightTime(data.moonDistKm);
+
+      // Location
+      if (data.locVisible && data.locLatStr) {
+        locSection.style.display = '';
+        const dflt = data.locIsDefault ? ' (approx)' : '';
+        locCoords.textContent = `${data.locLatStr}  ${data.locLonStr}${dflt}`;
+        locTime.textContent = data.locLocalTime ?? '—';
+        locSunset.textContent = data.locSunset ?? '—';
+      } else {
+        locSection.style.display = 'none';
+      }
     },
 
     tickPlayback() {

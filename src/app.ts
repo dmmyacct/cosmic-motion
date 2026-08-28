@@ -71,8 +71,6 @@ export class CosmicMotionApp {
   private orbitalRing!: THREE.Line;
   private locMarker!: THREE.Group;
   private locDot!: THREE.Mesh;
-  private locLine!: THREE.Line;
-  private locCard!: THREE.Sprite;
   private locVisible = true;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
@@ -493,28 +491,14 @@ export class CosmicMotionApp {
   private buildLocationMarker(): void {
     this.locMarker = new THREE.Group();
 
-    // Glowing dot on Earth surface
-    const dotGeo = new THREE.SphereGeometry(0.025, 12, 12);
+    // Small glowing dot on Earth surface
+    const dotGeo = new THREE.SphereGeometry(0.02, 12, 12);
     const dotMat = new THREE.MeshBasicMaterial({
       color: 0x00ff88, transparent: true, opacity: 0.9,
       blending: THREE.AdditiveBlending, depthWrite: false,
     });
     this.locDot = new THREE.Mesh(dotGeo, dotMat);
     this.locMarker.add(this.locDot);
-
-    // Thin line from surface to card
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(), new THREE.Vector3(0, 1, 0),
-    ]);
-    this.locLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({
-      color: 0x00ff88, transparent: true, opacity: 0.25, depthWrite: false,
-    }));
-    this.locMarker.add(this.locLine);
-
-    // Info card sprite
-    this.locCard = this.makeDistLabel();
-    this.locCard.scale.set(10, 2.5, 1);
-    this.locMarker.add(this.locCard);
 
     this.scene.add(this.locMarker);
   }
@@ -528,8 +512,6 @@ export class CosmicMotionApp {
     const latRad = loc.latDeg * Math.PI / 180;
     const lonRad = loc.lonDeg * Math.PI / 180;
 
-    // Position on unit sphere (Three.js coords: Y=up, Z=toward camera)
-    // Standard spherical: lon=0 is +X, lat=0 is equator
     const cosLat = Math.cos(latRad);
     const surfacePos = new THREE.Vector3(
       cosLat * Math.cos(lonRad),
@@ -537,7 +519,6 @@ export class CosmicMotionApp {
       -cosLat * Math.sin(lonRad),
     ).multiplyScalar(EARTH_R * 1.005);
 
-    // Apply same rotation as Earth: tilt + spin
     const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
     const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
@@ -546,123 +527,58 @@ export class CosmicMotionApp {
       this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
     );
     const earthQuat = tiltQuat.clone().multiply(spinQuat);
+    this.locDot.position.copy(surfacePos.clone().applyQuaternion(earthQuat));
+  }
 
-    const worldPos = surfacePos.clone().applyQuaternion(earthQuat);
-    this.locDot.position.copy(worldPos);
-
-    // Line extends outward from Earth surface
-    const cardOffset = worldPos.clone().normalize().multiplyScalar(1.2);
-    const cardPos = worldPos.clone().add(cardOffset);
-    const lineArr = new Float32Array([
-      worldPos.x, worldPos.y, worldPos.z,
-      cardPos.x, cardPos.y, cardPos.z,
-    ]);
-    this.locLine.geometry.setAttribute('position', new THREE.BufferAttribute(lineArr, 3));
-
-    this.locCard.position.copy(cardPos);
-
-    // Use the browser's actual local time — this is always correct
+  private computeLocationData(): { latStr: string; lonStr: string; localTime: string; sunset: string; isDefault: boolean } {
+    const loc = this.locationService.location;
+    const latRad = loc.latDeg * Math.PI / 180;
     const now = new Date();
-    const localTimeStr = now.toLocaleTimeString('en-US', {
-      hour: 'numeric', minute: '2-digit', hour12: true,
-    });
 
-    // Sun declination from ecliptic coordinates (independent of Earth spin)
-    // sunDir is in ecliptic cartesian. Convert to equatorial to get declination.
+    const localTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
     const sd = this.data.sunDir;
     const eps = this.data.obliquity;
     const sunEqY = sd[1] * Math.cos(eps) + sd[2] * Math.sin(eps);
     const sunDecl = Math.asin(Math.max(-1, Math.min(1, sunEqY)));
 
-    // Hour angle at sunset: cos(H) = (sin(h0) - sin(lat)*sin(dec)) / (cos(lat)*cos(dec))
-    // h0 = -0.833° = -0.01454 rad (standard refraction correction)
     const cosHA = (Math.sin(-0.01454) - Math.sin(latRad) * Math.sin(sunDecl))
       / (Math.cos(latRad) * Math.cos(sunDecl));
 
-    let sunsetStr: string;
+    let sunset: string;
     if (cosHA > 1) {
-      sunsetStr = 'No sunset (polar night)';
+      sunset = 'Polar night';
     } else if (cosHA < -1) {
-      sunsetStr = 'No sunset (midnight sun)';
+      sunset = 'Midnight sun';
     } else {
-      const haSet = Math.acos(cosHA); // radians
-
-      // Equation of time for solar noon correction
+      const haSet = Math.acos(cosHA);
       const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400_000);
       const B = (2 * Math.PI / 365) * (dayOfYear - 81);
-      const eqOfTime = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B); // minutes
-
-      // Sunset time in UTC hours
+      const eqOfTime = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
       const solarNoonUTC = 12 - loc.lonDeg / 15 - eqOfTime / 60;
       const sunsetUTC = solarNoonUTC + haSet * (12 / Math.PI);
-
-      // Convert to local Date for accurate comparison
       const sunsetDate = new Date(now);
       sunsetDate.setUTCHours(0, 0, 0, 0);
       sunsetDate.setTime(sunsetDate.getTime() + sunsetUTC * 3600_000);
-
-      // If sunset already passed today, show tomorrow's
       let diffMs = sunsetDate.getTime() - now.getTime();
-      if (diffMs < -600_000) { // more than 10 min ago
-        diffMs += 86400_000;
-      }
-
+      if (diffMs < -600_000) diffMs += 86400_000;
       if (diffMs < 0) {
-        sunsetStr = 'Sun has set';
+        sunset = 'Sun has set';
       } else {
         const totalMin = Math.round(diffMs / 60_000);
         const uh = Math.floor(totalMin / 60);
         const um = totalMin % 60;
-        sunsetStr = uh > 0 ? `Sunset in ${uh}h ${um}m` : `Sunset in ${um}m`;
+        sunset = uh > 0 ? `${uh}h ${um}m` : `${um}m`;
       }
     }
 
-    const latStr = `${Math.abs(loc.latDeg).toFixed(2)}°${loc.latDeg >= 0 ? 'N' : 'S'}`;
-    const lonStr = `${Math.abs(loc.lonDeg).toFixed(2)}°${loc.lonDeg >= 0 ? 'E' : 'W'}`;
-    const locLabel = this.locationService.hasRealLocation ? '' : '  (default)';
-
-    this.updateLocCard(
-      `${latStr}  ${lonStr}${locLabel}  ·  ${localTimeStr}`,
-      sunsetStr,
-    );
-  }
-
-  private updateLocCard(line1: string, line2: string): void {
-    const canvas = document.createElement('canvas');
-    canvas.width = 800; canvas.height = 200;
-    const ctx = canvas.getContext('2d')!;
-
-    // Subtle glass background
-    ctx.fillStyle = 'rgba(6, 12, 20, 0.65)';
-    ctx.beginPath();
-    ctx.roundRect(40, 20, 720, 160, 12);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 255, 136, 0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(40, 20, 720, 160, 12);
-    ctx.stroke();
-
-    // Line 1: location + time
-    ctx.font = '500 30px -apple-system, system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillText(line1, 400, 72);
-
-    // Line 2: sunset
-    ctx.font = '400 24px -apple-system, system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.7)';
-    ctx.fillText(line2, 400, 128);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.minFilter = THREE.LinearFilter;
-    const mat = this.locCard.material as THREE.SpriteMaterial;
-    mat.map?.dispose();
-    mat.map = tex;
-    mat.needsUpdate = true;
+    return {
+      latStr: `${Math.abs(loc.latDeg).toFixed(2)}°${loc.latDeg >= 0 ? 'N' : 'S'}`,
+      lonStr: `${Math.abs(loc.lonDeg).toFixed(2)}°${loc.lonDeg >= 0 ? 'E' : 'W'}`,
+      localTime,
+      sunset,
+      isDefault: !this.locationService.hasRealLocation,
+    };
   }
 
   private buildPoleSweeps(): void {
@@ -1117,6 +1033,8 @@ export class CosmicMotionApp {
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
+    const locData = this.locVisible ? this.computeLocationData() : null;
+
     this.ui.update({
       speedKmS: this.data.speedKmS,
       orbitalSpeedKmS: this.data.orbitalSpeedKmS,
@@ -1128,6 +1046,12 @@ export class CosmicMotionApp {
       obliquity: this.data.obliquity,
       rotationAngle: this.data.rotationAngle,
       date: new Date(),
+      locVisible: this.locVisible,
+      locLatStr: locData?.latStr,
+      locLonStr: locData?.lonStr,
+      locLocalTime: locData?.localTime,
+      locSunset: locData?.sunset,
+      locIsDefault: locData?.isDefault,
     });
     this.updateGhost();
   }
