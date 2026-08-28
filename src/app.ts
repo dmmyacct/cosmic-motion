@@ -177,7 +177,7 @@ export class CosmicMotionApp {
     this.controls.rotateSpeed = 0.5;
     this.controls.zoomSpeed = 0.8;
     this.controls.minDistance = 2;
-    this.controls.maxDistance = 80;
+    this.controls.maxDistance = 200;
     this.controls.enablePan = false;
     this.controls.target.set(0, 0, 0);
 
@@ -204,7 +204,7 @@ export class CosmicMotionApp {
     // Real bright stars from Hipparcos catalog
     const realCount = BRIGHT_STARS.length;
     // Background stars to fill the sky — mix of bright and dim
-    const bgCount = 20000;
+    const bgCount = 40000;
     const totalCount = realCount + bgCount;
     const pos = new Float32Array(totalCount * 3);
     const colors = new Float32Array(totalCount * 3);
@@ -242,7 +242,7 @@ export class CosmicMotionApp {
     for (let i = realCount; i < totalCount; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = R + Math.random() * 200;
+      const r = R * (0.7 + Math.random() * 0.8);
       pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
       pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = r * Math.cos(phi);
@@ -1451,7 +1451,7 @@ export class CosmicMotionApp {
       this.trajectoryMesh = new THREE.Mesh(); // placeholder — using Line instead
       this.trajectoryGlowPast = new THREE.Mesh();
       const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0x9c6dff, transparent: true, opacity: 0.4,
+        color: 0x9c6dff, transparent: true, opacity: 0.55,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scenePivot.add(line);
@@ -1463,7 +1463,7 @@ export class CosmicMotionApp {
       this.trajectoryForwardMesh = new THREE.Mesh();
       this.trajectoryGlowFuture = new THREE.Mesh();
       const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0x00e5ff, transparent: true, opacity: 0.5,
+        color: 0x00e5ff, transparent: true, opacity: 0.6,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scenePivot.add(line);
@@ -1480,35 +1480,37 @@ export class CosmicMotionApp {
 
     const sunPastPts: THREE.Vector3[] = [];
     const sunFuturePts: THREE.Vector3[] = [];
-    const sunSteps = 120;
+    // Extend Sun line well beyond the trajectory range for visual depth
+    const sunExtend = daysRange * 1.5;
+    const sunSteps = 200;
     for (let i = -sunSteps; i <= sunSteps; i++) {
-      const dayOff = (i / sunSteps) * daysRange;
+      const dayOff = (i / sunSteps) * sunExtend;
       const drift = galDir.clone().multiplyScalar(dayOff * driftPerDay);
       const p = sunPos.clone().add(drift);
       if (dayOff <= 0.01) sunPastPts.push(p.clone());
       if (dayOff >= -0.01) sunFuturePts.push(p);
     }
 
-    // Sun past trajectory — single warm golden line
+    // Sun past trajectory — simple golden line
     if (sunPastPts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(sunPastPts, false, 'centripetal');
-      const geo = new THREE.TubeGeometry(curve, Math.min(sunPastPts.length * 2, 256), 0.04, 6, false);
-      this.sunTrajectoryPast = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffa726, transparent: true, opacity: 0.15,
+      const geo = new THREE.BufferGeometry().setFromPoints(sunPastPts);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: 0xffa726, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scenePivot.add(this.sunTrajectoryPast);
+      this.sunTrajectoryPast = line as unknown as THREE.Mesh;
+      this.scenePivot.add(line);
     }
 
-    // Sun future trajectory — single warm golden line
+    // Sun future trajectory — simple golden line
     if (sunFuturePts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(sunFuturePts, false, 'centripetal');
-      const geo = new THREE.TubeGeometry(curve, Math.min(sunFuturePts.length * 2, 256), 0.05, 6, false);
-      this.sunTrajectoryFuture = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffcc00, transparent: true, opacity: 0.2,
+      const geo = new THREE.BufferGeometry().setFromPoints(sunFuturePts);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: 0xffcc00, transparent: true, opacity: 0.25,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scenePivot.add(this.sunTrajectoryFuture);
+      this.sunTrajectoryFuture = line as unknown as THREE.Mesh;
+      this.scenePivot.add(line);
     }
   }
 
