@@ -57,6 +57,8 @@ export class CosmicMotionApp {
   private ghostSunDistLabel!: THREE.Sprite;
   private ghostMoonDistLabel!: THREE.Sprite;
   private ghostLabel!: THREE.Sprite;
+  private earthTravelLabel!: THREE.Sprite;
+  private sunTravelLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
   private sunGlow!: THREE.Sprite;
@@ -658,6 +660,15 @@ export class CosmicMotionApp {
     return { earthKm: earthAU * AU_KM, sunKm };
   }
 
+  private fmtTravelDist(km: number): string {
+    if (km >= 1e12) return `${(km / 1e9).toFixed(1)}B km`;
+    if (km >= 1e9) return `${(km / 1e9).toFixed(2)}B km`;
+    if (km >= 1e7) return `${(km / 1e6).toFixed(1)}M km`;
+    if (km >= 1e6) return `${(km / 1e6).toFixed(2)}M km`;
+    if (km >= 1e3) return `${(km / 1e3).toFixed(1)}K km`;
+    return `${Math.round(km).toLocaleString()} km`;
+  }
+
   private buildPoleSweeps(): void {
     this.poleSweepGroup = new THREE.Group();
     const axisLen = EARTH_R * 2.5;
@@ -1016,6 +1027,17 @@ export class CosmicMotionApp {
     this.ghostLabel.scale.set(2.5, 0.6, 1);
     this.ghostGroup.add(this.ghostLabel);
 
+    // Travel-distance labels (not inside ghostGroup — they span current→ghost)
+    this.earthTravelLabel = this.makeDistLabel();
+    this.earthTravelLabel.scale.set(7, 0.9, 1);
+    this.earthTravelLabel.visible = false;
+    this.scene.add(this.earthTravelLabel);
+
+    this.sunTravelLabel = this.makeDistLabel();
+    this.sunTravelLabel.scale.set(7, 0.9, 1);
+    this.sunTravelLabel.visible = false;
+    this.scene.add(this.sunTravelLabel);
+
     this.scene.add(this.ghostGroup);
   }
 
@@ -1135,6 +1157,8 @@ export class CosmicMotionApp {
 
     if (Math.abs(this.ghostOffsetHours) < 0.01) {
       this.ghostGroup.visible = false;
+      this.earthTravelLabel.visible = false;
+      this.sunTravelLabel.visible = false;
       return;
     }
 
@@ -1257,6 +1281,43 @@ export class CosmicMotionApp {
     // Ghost label
     this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R * 2.5 + 0.5, 0));
     this.updateGhostLabel(ghostDate);
+
+    // Travel-distance labels along the trajectory lines
+    const travel = this.computeTravelDistances(this.ghostOffsetHours);
+    const primaryEarthPos = new THREE.Vector3(0, 0, 0);
+    const primarySunPos2 = eclToThree(this.data.sunDir).multiplyScalar(SUN_DIST);
+
+    // Earth travel label — midpoint of current→ghost Earth, offset slightly
+    const earthMid = primaryEarthPos.clone().lerp(ghostPos, 0.5);
+    const earthLineDir = ghostPos.clone().sub(primaryEarthPos).normalize();
+    const earthPerp = new THREE.Vector3(-earthLineDir.z, 0, earthLineDir.x).normalize();
+    earthMid.add(earthPerp.multiplyScalar(1.2));
+    earthMid.y += 0.8;
+    this.earthTravelLabel.position.copy(earthMid);
+    this.earthTravelLabel.visible = true;
+    // Scale based on distance to camera so it stays readable
+    const earthCamDist = this.camera.position.distanceTo(earthMid);
+    const earthScale = Math.max(4, Math.min(12, earthCamDist * 0.35));
+    this.earthTravelLabel.scale.set(earthScale, earthScale * 0.13, 1);
+    this.updateDistLabel(
+      this.earthTravelLabel,
+      `⊕ ${this.fmtTravelDist(travel.earthKm)} traveled`,
+      'rgba(130, 180, 255, 0.75)',
+    );
+
+    // Sun travel label — midpoint of current→ghost Sun, offset slightly
+    const sunMid = primarySunPos2.clone().lerp(this.ghostSunWorldPos, 0.5);
+    sunMid.y += 2;
+    this.sunTravelLabel.position.copy(sunMid);
+    this.sunTravelLabel.visible = true;
+    const sunCamDist = this.camera.position.distanceTo(sunMid);
+    const sunScale = Math.max(5, Math.min(15, sunCamDist * 0.35));
+    this.sunTravelLabel.scale.set(sunScale, sunScale * 0.13, 1);
+    this.updateDistLabel(
+      this.sunTravelLabel,
+      `☉ ${this.fmtTravelDist(travel.sunKm)} traveled`,
+      'rgba(255, 220, 130, 0.75)',
+    );
   }
 
   private updateGhostLabel(date: Date): void {
