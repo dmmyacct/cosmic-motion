@@ -75,7 +75,6 @@ const GALACTIC_VIS_COMPRESSION = 8;
 export function computeSceneData(
   date: Date,
   daysRange: number = 10,
-  stepsPerDay: number = 4,
 ): SceneData {
   const jd = dateToTDBJD(date);
   const jdUTC = dateToJD(date);
@@ -107,17 +106,29 @@ export function computeSceneData(
   // GMST = Earth's rotation angle
   const rotationAngle = gmst(jdUTC);
 
-  // Trajectory: positions at regular intervals
-  // Includes Sun's galactic motion so the path is a helix, not a closed orbit
-  const totalSteps = daysRange * stepsPerDay * 2;
+  // Trajectory: adaptive step sizes — fine near "now", coarser far out
+  // This lets us cover ±100 years without computing millions of points
   const trajectory: TrajectoryPoint[] = [];
-  for (let i = -totalSteps / 2; i <= totalSteps / 2; i++) {
-    const dayOff = (i / stepsPerDay);
+  const dayOffsets: number[] = [];
+
+  // Build adaptive sample schedule
+  // ±7 days: every 6 hours | ±30d: daily | ±365d: every 3 days | ±3650d: every 10d | beyond: every 30d
+  for (let d = -daysRange; d <= daysRange;) {
+    dayOffsets.push(d);
+    const abs = Math.abs(d);
+    if (abs < 7) d += 0.25;
+    else if (abs < 30) d += 1;
+    else if (abs < 365) d += 3;
+    else if (abs < 3650) d += 10;
+    else d += 30;
+  }
+  if (dayOffsets[dayOffsets.length - 1] < daysRange) dayOffsets.push(daysRange);
+
+  for (const dayOff of dayOffsets) {
     const tJD = jd + dayOff;
     const e = earthHelioEcliptic(tJD);
     const pos = eclipticSphericalToCartesian(e.L, e.B, e.R);
     const helioOffset = vec3Sub(pos, earthPos);
-    // Compressed galactic drift so the helix shape is visible
     const galacticDrift = vec3Scale(SOLAR_VEL_AU_DAY, dayOff / GALACTIC_VIS_COMPRESSION);
     trajectory.push({
       pos: vec3Add(helioOffset, galacticDrift),

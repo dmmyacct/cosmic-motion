@@ -14,6 +14,7 @@ import { computeSceneData, type SceneData } from './engine/observer';
 import { moonPosition } from './engine/lunar';
 import { raDecToCartesian, equatorialToEcliptic, obliquity } from './engine/coordinates';
 import { dateToJD } from './engine/time';
+import { BRIGHT_STARS, bvToRGB } from './engine/stars';
 import { LocationService } from './sensors/location';
 import { createUI } from './ui/controls';
 
@@ -175,40 +176,94 @@ export class CosmicMotionApp {
   // ── Build objects ──
 
   private buildStarfield(): void {
-    const count = 8000;
-    const pos = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
+    const R = 600;
+    const eps = 23.4393 * Math.PI / 180; // J2000 obliquity for coordinate conversion
+    const cosE = Math.cos(eps), sinE = Math.sin(eps);
+
+    // Real bright stars from Hipparcos catalog
+    const realCount = BRIGHT_STARS.length;
+    // Dim background stars to fill the sky
+    const bgCount = 6000;
+    const totalCount = realCount + bgCount;
+    const pos = new Float32Array(totalCount * 3);
+    const colors = new Float32Array(totalCount * 3);
+    const sizes = new Float32Array(totalCount);
+
+    for (let i = 0; i < realCount; i++) {
+      const s = BRIGHT_STARS[i];
+      const raRad = s.ra * (Math.PI / 12);
+      const decRad = s.dec * (Math.PI / 180);
+
+      // Equatorial to ecliptic (J2000)
+      const eqX = Math.cos(decRad) * Math.cos(raRad);
+      const eqY = Math.cos(decRad) * Math.sin(raRad);
+      const eqZ = Math.sin(decRad);
+      const eclX = eqX;
+      const eclY = eqY * cosE + eqZ * sinE;
+      const eclZ = -eqY * sinE + eqZ * cosE;
+
+      // Ecliptic to Three.js: X→X, Y→-Z, Z→Y
+      pos[i * 3]     = eclX * R;
+      pos[i * 3 + 1] = eclZ * R;
+      pos[i * 3 + 2] = -eclY * R;
+
+      const [r, g, b] = bvToRGB(s.bv);
+      const brightness = Math.max(0.4, 1.0 - s.mag * 0.18);
+      colors[i * 3]     = r * brightness;
+      colors[i * 3 + 1] = g * brightness;
+      colors[i * 3 + 2] = b * brightness;
+
+      // Brighter stars get bigger points
+      sizes[i] = Math.max(1.5, 4.5 - s.mag * 1.0);
+    }
+
+    // Background filler stars — dimmer, random
+    for (let i = realCount; i < totalCount; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = 500 + Math.random() * 400;
-      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      const r = R + Math.random() * 200;
+      pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
       pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = r * Math.cos(phi);
 
-      const temp = Math.random();
-      const brightness = Math.random() < 0.95 ? 0.3 + Math.random() * 0.4 : 0.7 + Math.random() * 0.3;
-      if (temp < 0.3) {
-        colors[i * 3] = brightness * 0.8;
-        colors[i * 3 + 1] = brightness * 0.85;
-        colors[i * 3 + 2] = brightness;
-      } else if (temp < 0.6) {
-        colors[i * 3] = brightness;
-        colors[i * 3 + 1] = brightness * 0.95;
-        colors[i * 3 + 2] = brightness * 0.85;
-      } else {
-        colors[i * 3] = brightness;
-        colors[i * 3 + 1] = brightness;
-        colors[i * 3 + 2] = brightness;
-      }
+      const dim = 0.15 + Math.random() * 0.25;
+      colors[i * 3]     = dim;
+      colors[i * 3 + 1] = dim;
+      colors[i * 3 + 2] = dim * (0.9 + Math.random() * 0.2);
+      sizes[i] = 0.8 + Math.random() * 0.7;
     }
+
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const mat = new THREE.PointsMaterial({
-      size: 1.5, vertexColors: true, transparent: true, opacity: 0.8,
-      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader: `
+        attribute float size;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (300.0 / -mvPos.z);
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        void main() {
+          float d = length(gl_PointCoord - vec2(0.5));
+          float alpha = 1.0 - smoothstep(0.3, 0.5, d);
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+      vertexColors: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
+
     this.starfield = new THREE.Points(geo, mat);
     this.scene.add(this.starfield);
   }
@@ -791,7 +846,7 @@ export class CosmicMotionApp {
 
   private updateSceneData(): void {
     const date = new Date();
-    this.data = computeSceneData(date, 365, 1);
+    this.data = computeSceneData(date, 36525);
     this.needsDataUpdate = false;
 
     const velocityDir = eclToThree(this.data.velocityDir).normalize();
@@ -904,7 +959,7 @@ export class CosmicMotionApp {
     this.ghostGroup.visible = true;
 
     const ghostDate = new Date(Date.now() + this.ghostOffsetHours * 3600_000);
-    const ghostData = computeSceneData(ghostDate, 0, 1);
+    const ghostData = computeSceneData(ghostDate, 0);
     const offsetDays = this.ghostOffsetHours / 24;
     // Find the ghost Earth's position relative to NOW Earth using the trajectory
     // For positions within our trajectory range, interpolate; otherwise compute fresh
@@ -1067,14 +1122,15 @@ export class CosmicMotionApp {
     // Earth past trajectory — thin purple thread
     if (pastPts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(pastPts);
-      const geo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.03, 6, false);
+      const segs = Math.min(pastPts.length * 4, 512);
+      const geo = new THREE.TubeGeometry(curve, segs, 0.03, 6, false);
       this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0x9c6dff, transparent: true, opacity: 0.35,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scene.add(this.trajectoryMesh);
 
-      const glowGeo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.12, 6, false);
+      const glowGeo = new THREE.TubeGeometry(curve, segs, 0.12, 6, false);
       this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x7c4dff, transparent: true, opacity: 0.04,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -1085,14 +1141,15 @@ export class CosmicMotionApp {
     // Earth future trajectory — thin cyan thread
     if (futurePts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(futurePts);
-      const geo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.04, 6, false);
+      const segsF = Math.min(futurePts.length * 4, 512);
+      const geo = new THREE.TubeGeometry(curve, segsF, 0.04, 6, false);
       this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0x00e5ff, transparent: true, opacity: 0.45,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scene.add(this.trajectoryForwardMesh);
 
-      const glowGeo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.15, 6, false);
+      const glowGeo = new THREE.TubeGeometry(curve, segsF, 0.15, 6, false);
       this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x00bcd4, transparent: true, opacity: 0.05,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -1110,7 +1167,7 @@ export class CosmicMotionApp {
 
     const sunPastPts: THREE.Vector3[] = [];
     const sunFuturePts: THREE.Vector3[] = [];
-    const sunSteps = 60;
+    const sunSteps = 120;
     for (let i = -sunSteps; i <= sunSteps; i++) {
       const dayOff = (i / sunSteps) * daysRange;
       const drift = galDir.clone().multiplyScalar(dayOff * driftPerDay);
@@ -1122,7 +1179,7 @@ export class CosmicMotionApp {
     // Sun past trajectory — single warm golden line
     if (sunPastPts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(sunPastPts);
-      const geo = new THREE.TubeGeometry(curve, 64, 0.04, 6, false);
+      const geo = new THREE.TubeGeometry(curve, Math.min(sunPastPts.length * 2, 256), 0.04, 6, false);
       this.sunTrajectoryPast = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0xffa726, transparent: true, opacity: 0.15,
         blending: THREE.AdditiveBlending, depthWrite: false,
@@ -1133,7 +1190,7 @@ export class CosmicMotionApp {
     // Sun future trajectory — single warm golden line
     if (sunFuturePts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(sunFuturePts);
-      const geo = new THREE.TubeGeometry(curve, 64, 0.05, 6, false);
+      const geo = new THREE.TubeGeometry(curve, Math.min(sunFuturePts.length * 2, 256), 0.05, 6, false);
       this.sunTrajectoryFuture = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0xffcc00, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false,

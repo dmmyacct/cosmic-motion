@@ -28,10 +28,12 @@ const C_KMS = 299792.458;
 const EARTH_CIRCUMFERENCE_KM = 40075.017;
 const SIDEREAL_DAY_H = 23.9345;
 
+const MAX_HOURS = 876000; // 100 years
+
 function sliderToHours(t: number): number {
   const sign = Math.sign(t);
   const abs = Math.abs(t);
-  return sign * (Math.expm1(abs * 7) / Math.expm1(7)) * 8760;
+  return sign * (Math.expm1(abs * 7) / Math.expm1(7)) * MAX_HOURS;
 }
 
 function formatOffset(hours: number): string {
@@ -41,7 +43,8 @@ function formatOffset(hours: number): string {
   if (abs < 48) return `${abs.toFixed(1)} hrs ${dir}`;
   const days = abs / 24;
   if (days < 60) return `${days.toFixed(1)} days ${dir}`;
-  return `${(days / 30.44).toFixed(1)} months ${dir}`;
+  if (days < 730) return `${(days / 30.44).toFixed(1)} months ${dir}`;
+  return `${(days / 365.25).toFixed(1)} years ${dir}`;
 }
 
 function fmtDist(km: number): string {
@@ -96,6 +99,8 @@ const PLAY_SPEEDS = [
   { label: '1 day/s', hoursPerSec: 24 },
   { label: '1 week/s', hoursPerSec: 168 },
   { label: '1 month/s', hoursPerSec: 730 },
+  { label: '1 year/s', hoursPerSec: 8766 },
+  { label: '10 yrs/s', hoursPerSec: 87660 },
 ];
 
 export function createUI(container: HTMLElement, callbacks: UICallbacks) {
@@ -173,9 +178,9 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   timePanel.className = 'cm-time-panel';
   timePanel.innerHTML = `
     <div class="cm-time-label">
-      <span class="cm-time-past">− 1 year</span>
+      <span class="cm-time-past">− 100 yrs</span>
       <span class="cm-time-current">Now</span>
-      <span class="cm-time-future">+ 1 year</span>
+      <span class="cm-time-future">+ 100 yrs</span>
     </div>
     <input type="range" class="cm-time-slider" min="-100" max="100" step="0.1" value="0" />
     <div class="cm-time-info">
@@ -292,7 +297,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   // Scale note
   const scaleNote = document.createElement('div');
   scaleNote.className = 'cm-scale-note';
-  scaleNote.textContent = 'Galactic drift 8× compressed · Orbit and directions accurate';
+  scaleNote.textContent = '±100 yr range · VSOP87/ELP2000 ephemeris · Galactic drift 8× compressed';
   ui.appendChild(scaleNote);
 
   return {
@@ -331,7 +336,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       const dt = (now - lastPlayTime) / 1000;
       lastPlayTime = now;
       currentHoursOffset += playDirection * PLAY_SPEEDS[speedIndex].hoursPerSec * dt;
-      currentHoursOffset = Math.max(-8760, Math.min(8760, currentHoursOffset));
+      currentHoursOffset = Math.max(-MAX_HOURS, Math.min(MAX_HOURS, currentHoursOffset));
       callbacks.onTimeChange(currentHoursOffset);
       updateTimeDisplay(currentHoursOffset);
     },
