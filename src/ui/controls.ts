@@ -43,7 +43,8 @@ function formatOffset(hours: number): string {
 }
 
 function fmtDist(km: number): string {
-  if (km >= 1e6) return `${(km / 1e6).toFixed(2)}M km`;
+  if (km >= 1e9) return `${(km / 1e6).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}M km`;
+  if (km >= 1e6) return `${(km / 1e6).toFixed(1)}M km`;
   return `${Math.round(km).toLocaleString()} km`;
 }
 

@@ -121,12 +121,12 @@ export class CosmicMotionApp {
     this.scene.add(this.sunBeam);
 
     // Floating distance labels on beams
-    this.sunDistLabel = this.makeLabelSprite('', 'rgba(255,213,79,0.6)');
-    this.sunDistLabel.scale.set(3.5, 0.5, 1);
+    this.sunDistLabel = this.makeDistLabel('');
+    this.sunDistLabel.scale.set(8, 1.2, 1);
     this.scene.add(this.sunDistLabel);
 
-    this.moonDistLabel = this.makeLabelSprite('', 'rgba(200,200,195,0.5)');
-    this.moonDistLabel.scale.set(2.5, 0.4, 1);
+    this.moonDistLabel = this.makeDistLabel('');
+    this.moonDistLabel.scale.set(6, 0.9, 1);
     this.scene.add(this.moonDistLabel);
 
     this.ui = createUI(container, {
@@ -806,32 +806,31 @@ export class CosmicMotionApp {
     // Orbital ring — centered on the Sun, in the ecliptic plane
     this.orbitalRing.position.copy(sunPos);
 
-    // Sun distance label — midpoint of beam
-    const sunMid = sunPos.clone().multiplyScalar(0.5);
-    sunMid.y += 1.2;
+    // Sun distance label — positioned along beam, offset above
+    const sunMid = sunPos.clone().multiplyScalar(0.4);
+    sunMid.y += 2.5;
     this.sunDistLabel.position.copy(sunMid);
     const sunKm = this.data.sunDistAU * 149597870.7;
+    const sunMKm = (sunKm / 1e6).toFixed(1);
     const lightSec = sunKm / 299792.458;
     const lightMin = Math.floor(lightSec / 60);
     const lightS = Math.round(lightSec % 60);
-    this.updateSpriteText(
+    this.updateDistLabel(
       this.sunDistLabel,
-      `${this.data.sunDistAU.toFixed(3)} AU · ${lightMin}m ${lightS}s`,
-      'rgba(255,213,79,0.5)',
+      `⊕ → ☉  ${sunMKm}M km  (${this.data.sunDistAU.toFixed(4)} AU · ${lightMin}m ${lightS}s)`,
     );
 
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
 
-    // Moon distance label
+    // Moon distance label — above the moon
     const moonLabelPos = moonPos.clone();
-    moonLabelPos.y += EARTH_R * 0.5;
+    moonLabelPos.y += EARTH_R * 0.8;
     this.moonDistLabel.position.copy(moonLabelPos);
-    this.updateSpriteText(
+    this.updateDistLabel(
       this.moonDistLabel,
-      `${Math.round(this.data.moonDistKm).toLocaleString()} km`,
-      'rgba(200,200,195,0.4)',
+      `⊕ → ☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km`,
     );
 
     // Earth tilt
@@ -1088,6 +1087,43 @@ export class CosmicMotionApp {
     return new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false,
     }));
+  }
+
+  private makeDistLabel(text: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 64;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false, depthTest: false,
+    }));
+    return sprite;
+  }
+
+  private updateDistLabel(sprite: THREE.Sprite, text: string): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    // Dark backdrop pill
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    const m = ctx.measureText(text);
+    const textW = Math.min(480, 14 * text.length);
+    const px = (512 - textW) / 2 - 8;
+    ctx.beginPath();
+    ctx.roundRect(px, 10, textW + 16, 44, 6);
+    ctx.fill();
+    // Text
+    ctx.font = '500 22px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText(text, 256, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = sprite.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.map = tex;
+    mat.needsUpdate = true;
   }
 
   private updateSpriteText(sprite: THREE.Sprite, text: string, color: string): void {
