@@ -92,14 +92,12 @@ export class CosmicMotionApp {
     this.shadowGroup = new THREE.Group();
     this.scene.add(this.shadowGroup);
 
-    // Labels for Earth, Sun, Moon
-    this.nowLabel = this.makeLabelSprite('NOW', '#ffffff');
-    this.nowLabel.scale.set(1.8, 0.9, 1);
-    this.nowLabel.position.set(0, EARTH_R + 0.5, 0);
-    this.scene.add(this.nowLabel);
+    // Minimal labels — only Sun gets a small tag, Earth speaks for itself
+    this.nowLabel = this.makeLabelSprite('', '#ffffff');
+    this.nowLabel.visible = false;
 
-    this.sunLabel = this.makeLabelSprite('SUN', '#ffd54f');
-    this.sunLabel.scale.set(2.5, 1.2, 1);
+    this.sunLabel = this.makeLabelSprite('☉', '#ffd54f');
+    this.sunLabel.scale.set(1.4, 0.7, 1);
     this.scene.add(this.sunLabel);
 
     // Sun direction beam
@@ -113,9 +111,8 @@ export class CosmicMotionApp {
     }));
     this.scene.add(this.sunBeam);
 
-    this.moonLabel = this.makeLabelSprite('MOON', '#b0b0b0');
-    this.moonLabel.scale.set(1.5, 0.75, 1);
-    this.scene.add(this.moonLabel);
+    this.moonLabel = this.makeLabelSprite('', '#b0b0b0');
+    this.moonLabel.visible = false;
 
     // Highlight marker (for slider-selected shadow Earth)
     const hlGeo = new THREE.RingGeometry(EARTH_R * 0.5, EARTH_R * 0.7, 32);
@@ -190,24 +187,92 @@ export class CosmicMotionApp {
 
   private buildEarth(): void {
     const geo = new THREE.SphereGeometry(EARTH_R, 64, 64);
-    const mat = new THREE.MeshPhongMaterial({
-      color: 0x1565c0,
-      emissive: 0x0d2244,
-      emissiveIntensity: 0.4,
-      shininess: 30,
-      specular: 0x444455,
+
+    // Day/night shader: sunlit side shows ocean/land tones, dark side shows faint city-light emissive
+    const earthMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+      },
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        void main() {
+          vec3 sunDir = normalize(sunDirection);
+          float NdotL = dot(vNormal, sunDir);
+          // Smooth terminator
+          float dayFactor = smoothstep(-0.15, 0.25, NdotL);
+
+          // Day side: rich ocean blue with slight specular
+          vec3 dayColor = mix(
+            vec3(0.04, 0.12, 0.28),   // deep ocean
+            vec3(0.15, 0.45, 0.75),   // sunlit ocean
+            max(0.0, NdotL)
+          );
+
+          // Night side: dark with faint warm city lights
+          vec3 nightColor = vec3(0.008, 0.006, 0.015);
+          // Scattered "city" dots based on position hash
+          float hash = fract(sin(dot(vWorldPos.xz * 50.0, vec2(12.9898, 78.233))) * 43758.5453);
+          if (hash > 0.92) {
+            nightColor += vec3(0.12, 0.08, 0.02) * (hash - 0.92) * 12.0;
+          }
+
+          vec3 color = mix(nightColor, dayColor, dayFactor);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
     });
-    this.earth = new THREE.Mesh(geo, mat);
+    this.earth = new THREE.Mesh(geo, earthMat);
     this.scene.add(this.earth);
 
-    const atmoGeo = new THREE.SphereGeometry(EARTH_R * 1.12, 64, 64);
-    const atmoMat = new THREE.MeshBasicMaterial({
-      color: 0x4fc3f7,
+    // Fresnel atmosphere rim — glows blue at the edges, transparent face-on
+    const atmoGeo = new THREE.SphereGeometry(EARTH_R * 1.06, 64, 64);
+    const atmoMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+      },
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        varying vec3 vWorldNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vViewDir = normalize(-mvPos.xyz);
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        varying vec3 vWorldNormal;
+        void main() {
+          float fresnel = 1.0 - dot(vViewDir, vNormal);
+          fresnel = pow(fresnel, 3.0);
+          // Brighter on sunlit side
+          float sunFacing = dot(vWorldNormal, normalize(sunDirection));
+          float sunBoost = smoothstep(-0.3, 0.5, sunFacing);
+          float alpha = fresnel * (0.25 + 0.55 * sunBoost);
+          vec3 color = mix(vec3(0.2, 0.4, 0.9), vec3(0.4, 0.7, 1.0), sunBoost);
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
       transparent: true,
-      opacity: 0.06,
-      side: THREE.BackSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      side: THREE.FrontSide,
     });
     this.atmosphere = new THREE.Mesh(atmoGeo, atmoMat);
     this.scene.add(this.atmosphere);
@@ -312,12 +377,6 @@ export class CosmicMotionApp {
       this.rotationRingGroup.add(marker);
     }
 
-    // "SPIN" label
-    const spinLabel = this.makeLabelSprite('SPIN →', '#4fc3f7');
-    spinLabel.position.set(ringR + 0.4, 0, 0);
-    spinLabel.scale.set(1.2, 0.6, 1);
-    this.rotationRingGroup.add(spinLabel);
-
     this.scene.add(this.rotationRingGroup);
   }
 
@@ -334,26 +393,20 @@ export class CosmicMotionApp {
     this.axisLine = new THREE.Line(geo, mat);
     this.axisLine.computeLineDistances();
     this.scene.add(this.axisLine);
-
-    // "N" label at north pole
-    const nLabel = this.makeLabelSprite('N', '#ffffff');
-    nLabel.scale.set(0.6, 0.3, 1);
-    nLabel.position.set(0, len + 0.2, 0);
-    this.axisLine.add(nLabel);
   }
 
   private buildArrow(): void {
     this.arrowHelper = new THREE.ArrowHelper(
       new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 0),
-      EARTH_R * 4, 0x00e5ff, 0.3, 0.15,
+      EARTH_R * 3, 0x00e5ff, 0.2, 0.1,
     );
     this.arrowHelper.line.material = new THREE.LineBasicMaterial({
-      color: 0x00e5ff, transparent: true, opacity: 0.5,
+      color: 0x00e5ff, transparent: true, opacity: 0.3,
       blending: THREE.AdditiveBlending,
     });
     (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).blending = THREE.AdditiveBlending;
     (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).transparent = true;
-    (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).opacity = 0.6;
+    (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).opacity = 0.4;
     this.scene.add(this.arrowHelper);
   }
 
@@ -396,10 +449,10 @@ export class CosmicMotionApp {
       mesh.position.copy(pos);
       this.shadowGroup.add(mesh);
 
-      // Glow ring around each shadow Earth
-      const ringGeo = new THREE.RingGeometry(r * 1.3, r * 1.6, 32);
+      // Subtle glow ring
+      const ringGeo = new THREE.RingGeometry(r * 1.2, r * 1.4, 24);
       const ringMat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: Math.max(0.02, 0.12 - absD * 0.01),
+        color, transparent: true, opacity: Math.max(0.01, 0.06 - absD * 0.005),
         side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -407,13 +460,13 @@ export class CosmicMotionApp {
       ring.lookAt(this.camera.position);
       this.shadowGroup.add(ring);
 
-      if (absD <= 7) {
+      if (absD % 5 === 0) {
         const label = this.makeLabelSprite(
           d > 0 ? `+${d}d` : `${d}d`,
           isFuture ? '#00e5ff' : '#b388ff',
         );
-        label.position.copy(pos).add(new THREE.Vector3(0, r + 0.4, 0));
-        label.scale.set(1.5, 0.75, 1);
+        label.position.copy(pos).add(new THREE.Vector3(0, r + 0.3, 0));
+        label.scale.set(1.0, 0.5, 1);
         this.shadowGroup.add(label);
       }
     }
@@ -424,6 +477,11 @@ export class CosmicMotionApp {
     this.sunSprite.position.copy(sunPos);
     this.sunGlow.position.copy(sunPos);
     this.sunLabel.position.copy(sunPos).add(new THREE.Vector3(0, 5, 0));
+
+    // Update day/night shader sun direction
+    const sunDirNorm = eclToThree(this.data.sunDir).normalize();
+    (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
+    (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
 
     // Sun beam from Earth toward Sun
     const beamArr = new Float32Array([
@@ -491,42 +549,40 @@ export class CosmicMotionApp {
     if (this.trajectoryGlowPast) { this.scene.remove(this.trajectoryGlowPast); this.trajectoryGlowPast.geometry.dispose(); }
     if (this.trajectoryGlowFuture) { this.scene.remove(this.trajectoryGlowFuture); this.trajectoryGlowFuture.geometry.dispose(); }
 
-    // Past trajectory (purple)
+    // Past trajectory — thin, fading purple thread
     if (pastPts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(pastPts);
-      const geo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.08, 8, false);
+      const geo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.03, 6, false);
       const mat = new THREE.MeshBasicMaterial({
-        color: 0x9c6dff, transparent: true, opacity: 0.5,
+        color: 0x9c6dff, transparent: true, opacity: 0.35,
         blending: THREE.AdditiveBlending, depthWrite: false,
       });
       this.trajectoryMesh = new THREE.Mesh(geo, mat);
       this.scene.add(this.trajectoryMesh);
 
-      // Outer glow
-      const glowGeo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.25, 8, false);
+      const glowGeo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.12, 6, false);
       const glowMat = new THREE.MeshBasicMaterial({
-        color: 0x7c4dff, transparent: true, opacity: 0.06,
+        color: 0x7c4dff, transparent: true, opacity: 0.04,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
       });
       this.trajectoryGlowPast = new THREE.Mesh(glowGeo, glowMat);
       this.scene.add(this.trajectoryGlowPast);
     }
 
-    // Future trajectory (cyan, brighter)
+    // Future trajectory — thin, brighter cyan thread
     if (futurePts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(futurePts);
-      const geo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.1, 8, false);
+      const geo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.04, 6, false);
       const mat = new THREE.MeshBasicMaterial({
-        color: 0x00e5ff, transparent: true, opacity: 0.6,
+        color: 0x00e5ff, transparent: true, opacity: 0.45,
         blending: THREE.AdditiveBlending, depthWrite: false,
       });
       this.trajectoryForwardMesh = new THREE.Mesh(geo, mat);
       this.scene.add(this.trajectoryForwardMesh);
 
-      // Outer glow
-      const glowGeo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.3, 8, false);
+      const glowGeo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.15, 6, false);
       const glowMat = new THREE.MeshBasicMaterial({
-        color: 0x00bcd4, transparent: true, opacity: 0.08,
+        color: 0x00bcd4, transparent: true, opacity: 0.05,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
       });
       this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, glowMat);
