@@ -680,7 +680,7 @@ export class CosmicMotionApp {
 
   private updateSceneData(): void {
     const date = new Date();
-    this.data = computeSceneData(date, 10, 4);
+    this.data = computeSceneData(date, 365, 1);
     this.needsDataUpdate = false;
 
     this.forwardDir = eclToThree(this.data.velocityDir).normalize();
@@ -737,34 +737,23 @@ export class CosmicMotionApp {
     // Find the ghost Earth's position relative to NOW Earth using the trajectory
     // For positions within our trajectory range, interpolate; otherwise compute fresh
     let ghostPos: THREE.Vector3;
-    if (Math.abs(offsetDays) <= 10) {
-      const pts = this.data.trajectory;
-      // Find two bracketing points and interpolate
-      let lower = pts[0], upper = pts[pts.length - 1];
-      for (let i = 0; i < pts.length - 1; i++) {
-        if (pts[i].dayOffset <= offsetDays && pts[i + 1].dayOffset >= offsetDays) {
-          lower = pts[i];
-          upper = pts[i + 1];
-          break;
-        }
+    const pts = this.data.trajectory;
+    let lower = pts[0], upper = pts[pts.length - 1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (pts[i].dayOffset <= offsetDays && pts[i + 1].dayOffset >= offsetDays) {
+        lower = pts[i];
+        upper = pts[i + 1];
+        break;
       }
-      const range = upper.dayOffset - lower.dayOffset;
-      const t = range > 0 ? (offsetDays - lower.dayOffset) / range : 0;
-      ghostPos = new THREE.Vector3(
-        lower.pos[0] + t * (upper.pos[0] - lower.pos[0]),
-        lower.pos[1] + t * (upper.pos[1] - lower.pos[1]),
-        lower.pos[2] + t * (upper.pos[2] - lower.pos[2]),
-      );
-      ghostPos = eclToThree([ghostPos.x, ghostPos.y, ghostPos.z]).multiplyScalar(AU_TO_SCENE);
-    } else {
-      // Beyond ±10 day trajectory — use ghost's own trajectory center offset
-      // Compute with a wider range to get the position difference
-      const wideData = computeSceneData(new Date(), Math.ceil(Math.abs(offsetDays)) + 1, 1);
-      const closest = wideData.trajectory.reduce((best, pt) =>
-        Math.abs(pt.dayOffset - offsetDays) < Math.abs(best.dayOffset - offsetDays) ? pt : best
-      );
-      ghostPos = eclToThree(closest.pos).multiplyScalar(AU_TO_SCENE);
     }
+    const range = upper.dayOffset - lower.dayOffset;
+    const t = range > 0 ? (offsetDays - lower.dayOffset) / range : 0;
+    ghostPos = new THREE.Vector3(
+      lower.pos[0] + t * (upper.pos[0] - lower.pos[0]),
+      lower.pos[1] + t * (upper.pos[1] - lower.pos[1]),
+      lower.pos[2] + t * (upper.pos[2] - lower.pos[2]),
+    );
+    ghostPos = eclToThree([ghostPos.x, ghostPos.y, ghostPos.z]).multiplyScalar(AU_TO_SCENE);
 
     // Position the ghost group + store for camera tracking
     this.ghostWorldPos.copy(ghostPos);
