@@ -59,6 +59,8 @@ export class CosmicMotionApp {
   private arrowHelper!: THREE.ArrowHelper;
   private sunLabel!: THREE.Sprite;
   private sunBeam!: THREE.Line;
+  private sunDistLabel!: THREE.Sprite;
+  private moonDistLabel!: THREE.Sprite;
   private orbitalRing!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
@@ -118,6 +120,15 @@ export class CosmicMotionApp {
     }));
     this.scene.add(this.sunBeam);
 
+    // Floating distance labels on beams
+    this.sunDistLabel = this.makeLabelSprite('', 'rgba(255,213,79,0.6)');
+    this.sunDistLabel.scale.set(3.5, 0.5, 1);
+    this.scene.add(this.sunDistLabel);
+
+    this.moonDistLabel = this.makeLabelSprite('', 'rgba(200,200,195,0.5)');
+    this.moonDistLabel.scale.set(2.5, 0.4, 1);
+    this.scene.add(this.moonDistLabel);
+
     this.ui = createUI(container, {
       onTimeChange: (hours) => {
         this.ghostOffsetHours = hours;
@@ -151,6 +162,9 @@ export class CosmicMotionApp {
 
     this.updateSceneData();
     this.animate();
+
+    // Live mode: refresh data every 30s so positions stay current
+    setInterval(() => { this.needsDataUpdate = true; }, 30_000);
   }
 
   // ── Build objects ──
@@ -792,9 +806,33 @@ export class CosmicMotionApp {
     // Orbital ring — centered on the Sun, in the ecliptic plane
     this.orbitalRing.position.copy(sunPos);
 
+    // Sun distance label — midpoint of beam
+    const sunMid = sunPos.clone().multiplyScalar(0.5);
+    sunMid.y += 1.2;
+    this.sunDistLabel.position.copy(sunMid);
+    const sunKm = this.data.sunDistAU * 149597870.7;
+    const lightSec = sunKm / 299792.458;
+    const lightMin = Math.floor(lightSec / 60);
+    const lightS = Math.round(lightSec % 60);
+    this.updateSpriteText(
+      this.sunDistLabel,
+      `${this.data.sunDistAU.toFixed(3)} AU · ${lightMin}m ${lightS}s`,
+      'rgba(255,213,79,0.5)',
+    );
+
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
+
+    // Moon distance label
+    const moonLabelPos = moonPos.clone();
+    moonLabelPos.y += EARTH_R * 0.5;
+    this.moonDistLabel.position.copy(moonLabelPos);
+    this.updateSpriteText(
+      this.moonDistLabel,
+      `${Math.round(this.data.moonDistKm).toLocaleString()} km`,
+      'rgba(200,200,195,0.4)',
+    );
 
     // Earth tilt
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
@@ -805,7 +843,16 @@ export class CosmicMotionApp {
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
-    this.ui.update({ speedKmS: this.data.speedKmS, date: new Date() });
+    this.ui.update({
+      speedKmS: this.data.speedKmS,
+      orbitalSpeedKmS: this.data.orbitalSpeedKmS,
+      solarGalacticSpeedKmS: this.data.solarGalacticSpeedKmS,
+      sunDistAU: this.data.sunDistAU,
+      moonDistKm: this.data.moonDistKm,
+      obliquity: this.data.obliquity,
+      rotationAngle: this.data.rotationAngle,
+      date: new Date(),
+    });
     this.updateGhost();
   }
 
@@ -1027,20 +1074,39 @@ export class CosmicMotionApp {
 
   private makeLabelSprite(text: string, color: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 64;
+    canvas.width = 256; canvas.height = 64;
     const ctx = canvas.getContext('2d')!;
-    ctx.font = 'bold 30px -apple-system, system-ui, sans-serif';
+    ctx.font = '20px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.9)';
     ctx.shadowBlur = 8;
     ctx.fillStyle = color;
-    ctx.fillText(text, 64, 32);
+    ctx.fillText(text, 128, 32);
     const tex = new THREE.CanvasTexture(canvas);
     tex.minFilter = THREE.LinearFilter;
     return new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false,
     }));
+  }
+
+  private updateSpriteText(sprite: THREE.Sprite, text: string, color: string): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = '18px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = color;
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = sprite.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.map = tex;
+    mat.needsUpdate = true;
   }
 
   // ── Animation loop ──

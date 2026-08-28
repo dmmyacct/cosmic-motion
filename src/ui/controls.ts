@@ -1,5 +1,5 @@
 /**
- * UI — speed readout, logarithmic time scrubber, and playback controls.
+ * UI — left data panel, time scrubber, playback, live mode.
  */
 
 export interface UICallbacks {
@@ -9,41 +9,50 @@ export interface UICallbacks {
 
 export interface UIUpdateData {
   speedKmS: number;
+  orbitalSpeedKmS: number;
+  solarGalacticSpeedKmS: number;
+  sunDistAU: number;
+  moonDistKm: number;
+  obliquity: number;
+  rotationAngle: number;
   date: Date;
+  ghostDate?: Date;
+  ghostSunDistAU?: number;
+  ghostMoonDistKm?: number;
 }
 
-/** Map slider position [-1, 1] to hours offset using exponential scaling. */
+const AU_KM = 149597870.7;
+const C_KMS = 299792.458;
+const EARTH_CIRCUMFERENCE_KM = 40075.017;
+const SIDEREAL_DAY_H = 23.9345;
+
 function sliderToHours(t: number): number {
   const sign = Math.sign(t);
   const abs = Math.abs(t);
-  // Near center = minutes, edges = months
-  // exp(abs * 7) maps [0,1] → [1, ~1097], scaled to max ~8760 hours (365 days)
   return sign * (Math.expm1(abs * 7) / Math.expm1(7)) * 8760;
 }
 
 function formatOffset(hours: number): string {
   const abs = Math.abs(hours);
   const dir = hours > 0 ? 'ahead' : 'ago';
-  if (abs < 1) {
-    const mins = Math.round(abs * 60);
-    return `${mins} min ${dir}`;
-  }
-  if (abs < 48) {
-    return `${abs.toFixed(1)} hrs ${dir}`;
-  }
+  if (abs < 1) return `${Math.round(abs * 60)} min ${dir}`;
+  if (abs < 48) return `${abs.toFixed(1)} hrs ${dir}`;
   const days = abs / 24;
-  if (days < 60) {
-    return `${days.toFixed(1)} days ${dir}`;
-  }
-  const months = days / 30.44;
-  return `${months.toFixed(1)} months ${dir}`;
+  if (days < 60) return `${days.toFixed(1)} days ${dir}`;
+  return `${(days / 30.44).toFixed(1)} months ${dir}`;
 }
 
-function formatGhostDate(date: Date): string {
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+function fmtDist(km: number): string {
+  if (km >= 1e6) return `${(km / 1e6).toFixed(2)}M km`;
+  return `${Math.round(km).toLocaleString()} km`;
+}
+
+function fmtLightTime(km: number): string {
+  const sec = km / C_KMS;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const min = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${min}m ${s.toString().padStart(2, '0')}s`;
 }
 
 const PLAY_SPEEDS = [
@@ -60,18 +69,68 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   ui.className = 'cm-ui';
   container.appendChild(ui);
 
-  // Top: speed readout
-  const header = document.createElement('div');
-  header.className = 'cm-header';
-  header.innerHTML = `
-    <div class="cm-header-pre">Earth is moving through space at</div>
-    <div class="cm-header-speed">29.78 <span class="cm-unit">km/s</span></div>
-    <div class="cm-header-sub"><span class="cm-header-mph"></span></div>
-    <div class="cm-header-date"></div>
-  `;
-  ui.appendChild(header);
+  // ── Left data panel ──
+  const panel = document.createElement('div');
+  panel.className = 'cm-panel';
+  panel.innerHTML = `
+    <div class="cm-panel-mode">
+      <span class="cm-live-dot"></span>
+      <span class="cm-mode-label">LIVE</span>
+      <span class="cm-panel-date"></span>
+    </div>
 
-  // Bottom: time controls
+    <div class="cm-body-section cm-sun-section">
+      <div class="cm-body-header">
+        <span class="cm-body-icon">☉</span> Sun
+      </div>
+      <div class="cm-body-stats">
+        <div class="cm-stat"><span class="cm-stat-label">Galactic speed</span><span class="cm-stat-value cm-sun-galactic-speed">230 km/s</span></div>
+        <div class="cm-stat"><span class="cm-stat-label">Distance</span><span class="cm-stat-value cm-sun-dist">1.000 AU</span></div>
+        <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value cm-sun-dist-km">149.6M km</span></div>
+        <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-sun-light">8m 19s</span></div>
+      </div>
+
+      <div class="cm-body-section cm-earth-section">
+        <div class="cm-body-header">
+          <span class="cm-body-icon cm-earth-icon">⊕</span> Earth
+        </div>
+        <div class="cm-body-stats">
+          <div class="cm-stat"><span class="cm-stat-label">Space velocity</span><span class="cm-stat-value cm-earth-total-speed">234.6 km/s</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Orbital speed</span><span class="cm-stat-value cm-earth-orbital-speed">29.78 km/s</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Rotation</span><span class="cm-stat-value cm-earth-rotation-speed">1,674 km/h</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Axial tilt</span><span class="cm-stat-value cm-earth-tilt">23.44°</span></div>
+        </div>
+
+        <div class="cm-body-section cm-moon-section">
+          <div class="cm-body-header">
+            <span class="cm-body-icon cm-moon-icon">☽</span> Moon
+          </div>
+          <div class="cm-body-stats">
+            <div class="cm-stat"><span class="cm-stat-label">Distance</span><span class="cm-stat-value cm-moon-dist">384,400 km</span></div>
+            <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-moon-light">1.3s</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  ui.appendChild(panel);
+
+  // Cache DOM references
+  const panelDate = panel.querySelector('.cm-panel-date')!;
+  const modeDot = panel.querySelector('.cm-live-dot') as HTMLElement;
+  const modeLabel = panel.querySelector('.cm-mode-label')!;
+  const sunGalSpeed = panel.querySelector('.cm-sun-galactic-speed')!;
+  const sunDist = panel.querySelector('.cm-sun-dist')!;
+  const sunDistKm = panel.querySelector('.cm-sun-dist-km')!;
+  const sunLight = panel.querySelector('.cm-sun-light')!;
+  const earthTotalSpeed = panel.querySelector('.cm-earth-total-speed')!;
+  const earthOrbitalSpeed = panel.querySelector('.cm-earth-orbital-speed')!;
+  const earthRotSpeed = panel.querySelector('.cm-earth-rotation-speed')!;
+  const earthTilt = panel.querySelector('.cm-earth-tilt')!;
+  const moonDist = panel.querySelector('.cm-moon-dist')!;
+  const moonLight = panel.querySelector('.cm-moon-light')!;
+
+  // ── Bottom: time controls ──
   const timePanel = document.createElement('div');
   timePanel.className = 'cm-time-panel';
   timePanel.innerHTML = `
@@ -114,33 +173,32 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   function emitChange(hours: number): void {
     currentHoursOffset = hours;
     callbacks.onTimeChange(hours);
-    updateDisplay(hours);
+    updateTimeDisplay(hours);
   }
 
-  function updateDisplay(hours: number): void {
-    if (Math.abs(hours) < 0.005) {
+  function updateTimeDisplay(hours: number): void {
+    const isLive = Math.abs(hours) < 0.005;
+    modeDot.className = isLive ? 'cm-live-dot live' : 'cm-live-dot';
+    modeLabel.textContent = isLive ? 'LIVE' : 'TIME TRAVEL';
+
+    if (isLive) {
       offsetEl.textContent = '';
       ghostDateEl.textContent = '';
-      return;
+    } else {
+      offsetEl.textContent = formatOffset(hours);
+      const ghostDate = new Date(Date.now() + hours * 3600_000);
+      ghostDateEl.textContent = ghostDate.toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
     }
-    offsetEl.textContent = formatOffset(hours);
-    const ghostDate = new Date(Date.now() + hours * 3600_000);
-    ghostDateEl.textContent = formatGhostDate(ghostDate);
   }
 
   slider.addEventListener('input', () => {
-    const t = parseFloat(slider.value) / 100;
-    const hours = sliderToHours(t);
-    emitChange(hours);
+    emitChange(sliderToHours(parseFloat(slider.value) / 100));
   });
+  slider.addEventListener('dblclick', () => { slider.value = '0'; emitChange(0); });
 
-  // Double-click slider to reset
-  slider.addEventListener('dblclick', () => {
-    slider.value = '0';
-    emitChange(0);
-  });
-
-  // Playback
   playBtn.addEventListener('click', () => {
     playDirection = 1;
     playing = !playing;
@@ -193,7 +251,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   ui.appendChild(hint);
   setTimeout(() => { hint.style.opacity = '0'; }, 8000);
 
-  // Scale note — honest about compression
+  // Scale note
   const scaleNote = document.createElement('div');
   scaleNote.className = 'cm-scale-note';
   scaleNote.textContent = 'Galactic drift 8× compressed · Orbit and directions accurate';
@@ -201,21 +259,28 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
   return {
     update(data: UIUpdateData) {
-      const speed = header.querySelector('.cm-header-speed')!;
-      const mph = header.querySelector('.cm-header-mph')!;
-      const dateEl = header.querySelector('.cm-header-date')!;
-
-      const v = data.speedKmS;
-      speed.innerHTML = `${v.toFixed(2)} <span class="cm-unit">km/s</span>`;
-
-      const mphVal = v * 2236.936;
-      mph.textContent = `${Math.round(mphVal).toLocaleString()} mph · ${(v / 299792.458 * 100).toFixed(4)}% the speed of light`;
-
-      const d = data.date;
-      dateEl.textContent = d.toLocaleDateString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
+      // Date
+      panelDate.textContent = data.date.toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
+
+      // Sun
+      sunGalSpeed.textContent = `${data.solarGalacticSpeedKmS.toFixed(0)} km/s`;
+      sunDist.textContent = `${data.sunDistAU.toFixed(4)} AU`;
+      const sunKm = data.sunDistAU * AU_KM;
+      sunDistKm.textContent = fmtDist(sunKm);
+      sunLight.textContent = fmtLightTime(sunKm);
+
+      // Earth
+      earthTotalSpeed.textContent = `${data.speedKmS.toFixed(2)} km/s`;
+      earthOrbitalSpeed.textContent = `${data.orbitalSpeedKmS.toFixed(2)} km/s`;
+      const rotSpeedKmH = EARTH_CIRCUMFERENCE_KM / SIDEREAL_DAY_H;
+      earthRotSpeed.textContent = `${Math.round(rotSpeedKmH).toLocaleString()} km/h`;
+      earthTilt.textContent = `${(data.obliquity * 180 / Math.PI).toFixed(2)}°`;
+
+      // Moon
+      moonDist.textContent = fmtDist(data.moonDistKm);
+      moonLight.textContent = fmtLightTime(data.moonDistKm);
     },
 
     tickPlayback() {
@@ -223,12 +288,10 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       const now = performance.now();
       const dt = (now - lastPlayTime) / 1000;
       lastPlayTime = now;
-      const hoursPerSec = PLAY_SPEEDS[speedIndex].hoursPerSec;
-      currentHoursOffset += playDirection * hoursPerSec * dt;
-      // Clamp to ±1 year
+      currentHoursOffset += playDirection * PLAY_SPEEDS[speedIndex].hoursPerSec * dt;
       currentHoursOffset = Math.max(-8760, Math.min(8760, currentHoursOffset));
       callbacks.onTimeChange(currentHoursOffset);
-      updateDisplay(currentHoursOffset);
+      updateTimeDisplay(currentHoursOffset);
     },
   };
 }

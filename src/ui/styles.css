@@ -1,8 +1,9 @@
 :root {
   --font: -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   --accent: #00e5ff;
   --gold: #ffd54f;
-  --glass: rgba(10, 14, 30, 0.65);
+  --glass: rgba(10, 14, 30, 0.72);
   --glass-border: rgba(255, 255, 255, 0.06);
 }
 
@@ -22,9 +23,7 @@ html, body {
   position: relative;
 }
 
-canvas {
-  display: block;
-}
+canvas { display: block; }
 
 /* ── UI overlay ── */
 
@@ -35,55 +34,127 @@ canvas {
   z-index: 10;
 }
 
-/* Top: speed readout */
-.cm-header {
+/* ── Left data panel ── */
+
+.cm-panel {
   position: absolute;
-  top: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
+  top: 20px;
+  left: 20px;
+  width: 220px;
   pointer-events: none;
+  user-select: none;
 }
 
-.cm-header-pre {
-  font-size: 11px;
+.cm-panel-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
-  letter-spacing: 2.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.cm-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.cm-live-dot.live {
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.cm-mode-label {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.cm-panel-date {
+  color: rgba(255, 255, 255, 0.25);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+/* Body sections */
+
+.cm-body-section {
   margin-bottom: 4px;
 }
 
-.cm-header-speed {
-  font-size: 52px;
-  font-weight: 200;
-  letter-spacing: -1px;
-  color: #fff;
-  line-height: 1.1;
-}
-
-.cm-unit {
-  font-size: 18px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.4);
-  letter-spacing: 1px;
-}
-
-.cm-header-sub {
+.cm-body-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.25);
-  margin-top: 6px;
-  letter-spacing: 0.5px;
-}
-
-.cm-header-date {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.18);
-  margin-top: 4px;
+  font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
 }
 
-/* Bottom: time slider */
+.cm-body-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+}
+
+.cm-sun-section > .cm-body-header { color: var(--gold); }
+.cm-earth-section > .cm-body-header { color: var(--accent); }
+.cm-moon-section > .cm-body-header { color: rgba(200, 200, 195, 0.6); }
+
+.cm-body-stats {
+  margin-bottom: 8px;
+}
+
+/* Nested indentation */
+.cm-sun-section > .cm-body-section {
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  margin-left: 8px;
+}
+
+.cm-earth-section > .cm-body-section {
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  margin-left: 8px;
+}
+
+.cm-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 0;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.cm-stat-label {
+  color: rgba(255, 255, 255, 0.22);
+  letter-spacing: 0.3px;
+}
+
+.cm-stat-value {
+  color: rgba(255, 255, 255, 0.55);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: -0.2px;
+}
+
+/* ── Bottom: time slider ── */
+
 .cm-time-panel {
   position: absolute;
   bottom: 30px;
@@ -213,6 +284,7 @@ canvas {
 }
 
 /* ── Splash screen ── */
+
 .cm-splash {
   position: fixed;
   inset: 0;
@@ -275,9 +347,14 @@ canvas {
 
 /* Responsive */
 @media (max-width: 600px) {
-  .cm-header-speed { font-size: 36px; }
-  .cm-header-pre { font-size: 9px; }
-  .cm-header { top: 16px; }
+  .cm-panel {
+    top: 12px;
+    left: 12px;
+    width: 180px;
+  }
+  .cm-panel-mode { font-size: 9px; }
+  .cm-stat { font-size: 9px; }
+  .cm-body-header { font-size: 10px; }
   .cm-time-panel { bottom: 16px; }
   .cm-hint { bottom: 80px; font-size: 9px; }
 }
