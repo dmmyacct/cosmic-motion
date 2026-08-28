@@ -53,6 +53,8 @@ export class CosmicMotionApp {
   private ghostSunSprite!: THREE.Sprite;
   private ghostSunGlow!: THREE.Sprite;
   private ghostSunLabel!: THREE.Sprite;
+  private ghostSunDistLabel!: THREE.Sprite;
+  private ghostMoonDistLabel!: THREE.Sprite;
   private ghostLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
@@ -767,6 +769,16 @@ export class CosmicMotionApp {
     this.ghostSunLabel.material.opacity = 0.5;
     this.ghostGroup.add(this.ghostSunLabel);
 
+    // Ghost Sun distance label
+    this.ghostSunDistLabel = this.makeDistLabel();
+    this.ghostSunDistLabel.scale.set(7, 0.9, 1);
+    this.ghostGroup.add(this.ghostSunDistLabel);
+
+    // Ghost Moon distance + phase label
+    this.ghostMoonDistLabel = this.makeDistLabel();
+    this.ghostMoonDistLabel.scale.set(5, 0.65, 1);
+    this.ghostGroup.add(this.ghostMoonDistLabel);
+
     // Ghost date/time label
     this.ghostLabel = this.makeLabelSprite('', '#ffffff');
     this.ghostLabel.scale.set(2.5, 0.6, 1);
@@ -971,9 +983,42 @@ export class CosmicMotionApp {
     this.ghostMoon.position.copy(ghostPos).add(ghostMoonPos);
     (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
 
+    // Ghost Sun distance label — along the ghost sun beam
+    const ghostSunMid = ghostPos.clone().lerp(this.ghostSunWorldPos, 0.4);
+    ghostSunMid.y += 1.5;
+    this.ghostSunDistLabel.position.copy(ghostSunMid);
+    const gSunKm = ghostData.sunDistAU * 149597870.7;
+    const gLightSec = gSunKm / 299792.458;
+    const gLightMin = Math.floor(gLightSec / 60);
+    const gLightS = Math.round(gLightSec % 60);
+    this.updateDistLabel(
+      this.ghostSunDistLabel,
+      `☉  ${(gSunKm / 1e6).toFixed(1)}M km  ·  ${gLightMin}m ${String(gLightS).padStart(2, '0')}s light`,
+      'rgba(255, 230, 160, 0.6)',
+    );
+
+    // Ghost Moon distance + phase label
+    const ghostMoonLabelPos = ghostPos.clone().add(ghostMoonPos);
+    ghostMoonLabelPos.y += EARTH_R * 0.7;
+    this.ghostMoonDistLabel.position.copy(ghostMoonLabelPos);
+    const gSunV = new THREE.Vector3(...ghostData.sunDir);
+    const gMoonV = new THREE.Vector3(...ghostData.moonDir);
+    const gPhaseAngle = gSunV.angleTo(gMoonV);
+    const gCross = new THREE.Vector3().crossVectors(gSunV, gMoonV);
+    const gWaxing = gCross.z > 0;
+    const gPhaseDeg = gPhaseAngle * 180 / Math.PI;
+    const gPhaseName = gPhaseDeg > 175 ? 'New' : gPhaseDeg < 5 ? 'Full'
+      : gWaxing
+        ? (gPhaseDeg > 95 ? 'Wax. Crescent' : gPhaseDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
+        : (gPhaseDeg < 85 ? 'Wan. Gibbous' : gPhaseDeg < 95 ? '3rd Quarter' : 'Wan. Crescent');
+    this.updateDistLabel(
+      this.ghostMoonDistLabel,
+      `☽  ${Math.round(ghostData.moonDistKm).toLocaleString()} km  ·  ${gPhaseName}`,
+      'rgba(220, 220, 215, 0.6)',
+    );
+
     // Ghost label
     this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R * 2.5 + 0.5, 0));
-    // Update label texture with ghost date
     this.updateGhostLabel(ghostDate);
   }
 
