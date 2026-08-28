@@ -7,7 +7,7 @@ import { earthHelioEcliptic } from './vsop87';
 import { moonPosition } from './lunar';
 import { dateToTDBJD, dateToJD, gmst } from './time';
 import {
-  Vec3, vec3Sub, vec3Scale, vec3Length, vec3Normalize,
+  Vec3, vec3Add, vec3Sub, vec3Scale, vec3Length, vec3Normalize,
   eclipticSphericalToCartesian, eclipticVelocityToCartesian,
   obliquity, raDecToCartesian, equatorialToEcliptic,
 } from './coordinates';
@@ -50,6 +50,13 @@ export interface SceneData {
 
 const AU_DAY_TO_KM_S = AU_KM / 86400.0;
 
+// Sun's velocity through the galaxy (~230 km/s toward galactic rotation direction)
+// Direction: galactic (l=90°, b=0°) → equatorial RA≈318°, Dec≈+48° → ecliptic cartesian
+// Speed: 230 km/s = 230 * 86400 / 149597870.7 ≈ 0.0001329 AU/day
+const SOLAR_GALACTIC_SPEED_AU_DAY = 230 * 86400 / AU_KM;
+const SOLAR_GALACTIC_DIR: Vec3 = vec3Normalize([0.497, -0.115, 0.860]);
+const SOLAR_VEL_AU_DAY: Vec3 = vec3Scale(SOLAR_GALACTIC_DIR, SOLAR_GALACTIC_SPEED_AU_DAY);
+
 export function computeSceneData(
   date: Date,
   daysRange: number = 10,
@@ -67,10 +74,11 @@ export function computeSceneData(
     earth.dL, earth.dB, earth.dR,
   );
 
-  // Velocity direction and speed
-  const velKmS = vec3Scale(earthVel, AU_DAY_TO_KM_S);
+  // True velocity = orbital velocity + Sun's galactic velocity
+  const totalVel = vec3Add(earthVel, SOLAR_VEL_AU_DAY);
+  const velKmS = vec3Scale(totalVel, AU_DAY_TO_KM_S);
   const speedKmS = vec3Length(velKmS);
-  const velocityDir = vec3Normalize(earthVel);
+  const velocityDir = vec3Normalize(totalVel);
 
   // Earth's rotation axis in ecliptic coordinates
   // NCP in equatorial = (0, 0, 1), convert to ecliptic
@@ -80,6 +88,7 @@ export function computeSceneData(
   const rotationAngle = gmst(jdUTC);
 
   // Trajectory: positions at regular intervals
+  // Includes Sun's galactic motion so the path is a helix, not a closed orbit
   const totalSteps = daysRange * stepsPerDay * 2;
   const trajectory: TrajectoryPoint[] = [];
   for (let i = -totalSteps / 2; i <= totalSteps / 2; i++) {
@@ -87,8 +96,11 @@ export function computeSceneData(
     const tJD = jd + dayOff;
     const e = earthHelioEcliptic(tJD);
     const pos = eclipticSphericalToCartesian(e.L, e.B, e.R);
+    // Heliocentric offset + Sun's galactic drift over this time interval
+    const helioOffset = vec3Sub(pos, earthPos);
+    const galacticDrift = vec3Scale(SOLAR_VEL_AU_DAY, dayOff);
     trajectory.push({
-      pos: vec3Sub(pos, earthPos),
+      pos: vec3Add(helioOffset, galacticDrift),
       dayOffset: dayOff,
     });
   }
