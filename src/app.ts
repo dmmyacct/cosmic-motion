@@ -623,6 +623,41 @@ export class CosmicMotionApp {
     };
   }
 
+  private computeTravelDistances(offsetHours: number): { earthKm: number; sunKm: number } {
+    const offsetDays = offsetHours / 24;
+    const absDays = Math.abs(offsetDays);
+
+    // Sun's galactic travel: straight line, constant speed
+    const sunKm = this.data.solarGalacticSpeedKmS * Math.abs(offsetHours) * 3600;
+
+    // Earth's orbital travel: integrate arc length along the trajectory
+    // Walk through trajectory points from dayOffset=0 to dayOffset=offsetDays,
+    // summing the actual distances between consecutive positions (in AU, convert to km)
+    const AU_KM = 149597870.7;
+    const pts = this.data.trajectory;
+    let earthAU = 0;
+
+    // Find direction: past or future
+    const sign = offsetDays >= 0 ? 1 : -1;
+    let prevPos: [number, number, number] | null = null;
+
+    for (const pt of pts) {
+      if (sign > 0 && pt.dayOffset < 0) continue;
+      if (sign < 0 && pt.dayOffset > 0) continue;
+      if (Math.abs(pt.dayOffset) > absDays) break;
+
+      if (prevPos) {
+        const dx = pt.pos[0] - prevPos[0];
+        const dy = pt.pos[1] - prevPos[1];
+        const dz = pt.pos[2] - prevPos[2];
+        earthAU += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+      prevPos = pt.pos;
+    }
+
+    return { earthKm: earthAU * AU_KM, sunKm };
+  }
+
   private buildPoleSweeps(): void {
     this.poleSweepGroup = new THREE.Group();
     const axisLen = EARTH_R * 2.5;
@@ -1075,6 +1110,9 @@ export class CosmicMotionApp {
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
+    const travel = Math.abs(this.ghostOffsetHours) > 0.01
+      ? this.computeTravelDistances(this.ghostOffsetHours) : null;
+
     this.ui.update({
       speedKmS: this.data.speedKmS,
       orbitalSpeedKmS: this.data.orbitalSpeedKmS,
@@ -1086,6 +1124,8 @@ export class CosmicMotionApp {
       obliquity: this.data.obliquity,
       rotationAngle: this.data.rotationAngle,
       date: new Date(),
+      earthDistTraveled: travel?.earthKm,
+      sunDistTraveled: travel?.sunKm,
     });
     this.updateGhost();
   }

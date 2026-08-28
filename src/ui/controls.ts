@@ -22,12 +22,8 @@ export interface UIUpdateData {
   ghostDate?: Date;
   ghostSunDistAU?: number;
   ghostMoonDistKm?: number;
-  locLatStr?: string;
-  locLonStr?: string;
-  locLocalTime?: string;
-  locSunset?: string;
-  locIsDefault?: boolean;
-  locVisible?: boolean;
+  earthDistTraveled?: number;
+  sunDistTraveled?: number;
 }
 
 const AU_KM = 149597870.7;
@@ -57,6 +53,15 @@ function formatOffset(hours: number): string {
 function fmtDist(km: number): string {
   if (km >= 1e9) return `${(km / 1e6).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}M km`;
   if (km >= 1e6) return `${(km / 1e6).toFixed(1)}M km`;
+  return `${Math.round(km).toLocaleString()} km`;
+}
+
+function fmtTravelDist(km: number): string {
+  if (km >= 1e12) return `${(km / 1e9).toFixed(1)}B km`;
+  if (km >= 1e9) return `${(km / 1e9).toFixed(2)}B km`;
+  if (km >= 1e7) return `${(km / 1e6).toFixed(1)}M km`;
+  if (km >= 1e6) return `${(km / 1e6).toFixed(2)}M km`;
+  if (km >= 1e3) return `${(km / 1e3).toFixed(1)}K km`;
   return `${Math.round(km).toLocaleString()} km`;
 }
 
@@ -195,6 +200,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <span class="cm-time-offset"></span>
       <span class="cm-ghost-date"></span>
     </div>
+    <div class="cm-travel-dist"></div>
     <div class="cm-playback">
       <button class="cm-play-btn" title="Play/Pause">▶</button>
       <button class="cm-rev-btn" title="Reverse">◀</button>
@@ -209,6 +215,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const slider = timePanel.querySelector('.cm-time-slider') as HTMLInputElement;
   const offsetEl = timePanel.querySelector('.cm-time-offset')!;
   const ghostDateEl = timePanel.querySelector('.cm-ghost-date')!;
+  const travelDistEl = timePanel.querySelector('.cm-travel-dist') as HTMLElement;
   const playBtn = timePanel.querySelector('.cm-play-btn') as HTMLButtonElement;
   const revBtn = timePanel.querySelector('.cm-rev-btn') as HTMLButtonElement;
   const speedBtn = timePanel.querySelector('.cm-speed-btn') as HTMLButtonElement;
@@ -344,6 +351,15 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       moonDist.textContent = fmtDist(data.moonDistKm);
       moonLight.textContent = fmtLightTime(data.moonDistKm);
 
+      // Distance traveled (visible during time travel)
+      if (data.earthDistTraveled && data.earthDistTraveled > 100) {
+        travelDistEl.innerHTML = `<span class="cm-travel-label">⊕ traveled</span> <span class="cm-travel-value">${fmtTravelDist(data.earthDistTraveled)}</span>`
+          + `<span class="cm-travel-sep"> · </span>`
+          + `<span class="cm-travel-label">☉ traveled</span> <span class="cm-travel-value">${fmtTravelDist(data.sunDistTraveled ?? 0)}</span>`;
+        travelDistEl.style.display = '';
+      } else {
+        travelDistEl.style.display = 'none';
+      }
     },
 
     tickPlayback() {

@@ -255,6 +255,28 @@ canvas { display: block; }
   font-size: 10px;
 }
 
+.cm-travel-dist {
+  margin-top: 4px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+  letter-spacing: 0.2px;
+}
+
+.cm-travel-label {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.cm-travel-value {
+  color: rgba(255, 255, 255, 0.55);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+.cm-travel-sep {
+  color: rgba(255, 255, 255, 0.12);
+}
+
 .cm-playback {
   margin-top: 10px;
   display: flex;
