@@ -33,8 +33,8 @@ export class CosmicMotionApp {
   private earth!: THREE.Mesh;
   private atmosphere!: THREE.Mesh;
   private axisLine!: THREE.Line;
-  private rotationRingGroup!: THREE.Group;
-  private rotationRingLine!: THREE.Line;
+  private poleSweepGroup!: THREE.Group;
+  private northSweep!: THREE.Group;
   private trajectoryMesh!: THREE.Mesh;
   private trajectoryForwardMesh!: THREE.Mesh;
   private shadowGroup!: THREE.Group;
@@ -85,8 +85,8 @@ export class CosmicMotionApp {
     this.buildEarth();
     this.buildSun();
     this.buildMoon();
-    this.buildRotationRing();
     this.buildAxisLine();
+    this.buildPoleSweeps();
     this.buildArrow();
 
     this.shadowGroup = new THREE.Group();
@@ -344,40 +344,61 @@ export class CosmicMotionApp {
     this.scene.add(orbitLine);
   }
 
-  private buildRotationRing(): void {
-    this.rotationRingGroup = new THREE.Group();
-    const ringR = EARTH_R * 2.0;
+  private buildPoleSweeps(): void {
+    this.poleSweepGroup = new THREE.Group();
+    const axisLen = EARTH_R * 2.5;
 
-    // Ring line
-    const segments = 128;
-    const ringPts: THREE.Vector3[] = [];
+    this.northSweep = this.createSweepArc(0.35, 0.9);
+    this.northSweep.position.y = axisLen;
+    this.poleSweepGroup.add(this.northSweep);
+
+    this.scene.add(this.poleSweepGroup);
+  }
+
+  private createSweepArc(radius: number, brightness: number): THREE.Group {
+    const group = new THREE.Group();
+    const arcAngle = Math.PI * 1.6;
+    const segments = 80;
+
+    const positions = new Float32Array((segments + 1) * 3);
+    const colors = new Float32Array((segments + 1) * 3);
+
     for (let i = 0; i <= segments; i++) {
-      const a = (i / segments) * Math.PI * 2;
-      ringPts.push(new THREE.Vector3(ringR * Math.cos(a), 0, ringR * Math.sin(a)));
-    }
-    const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPts);
-    this.rotationRingLine = new THREE.Line(ringGeo, new THREE.LineBasicMaterial({
-      color: 0x4fc3f7, transparent: true, opacity: 0.25, depthWrite: false,
-    }));
-    this.rotationRingGroup.add(this.rotationRingLine);
+      const t = i / segments;
+      const angle = t * arcAngle;
+      positions[i * 3] = radius * Math.cos(angle);
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = radius * Math.sin(angle);
 
-    // Animated markers — bright dots orbiting to show spin direction
-    const markerCount = 12;
-    for (let i = 0; i < markerCount; i++) {
-      const a = (i / markerCount) * Math.PI * 2;
-      const size = 0.06 + (i % 3 === 0 ? 0.03 : 0);
-      const markerGeo = new THREE.SphereGeometry(size, 8, 8);
-      const markerMat = new THREE.MeshBasicMaterial({
-        color: 0x4fc3f7, transparent: true,
-        opacity: 0.4 + (i / markerCount) * 0.5,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      });
-      const marker = new THREE.Mesh(markerGeo, markerMat);
-      marker.position.set(ringR * Math.cos(a), 0, ringR * Math.sin(a));
-      this.rotationRingGroup.add(marker);
+      const fade = Math.pow(1.0 - t, 2.0) * brightness;
+      colors[i * 3] = 0.31 * fade;
+      colors[i * 3 + 1] = 0.76 * fade;
+      colors[i * 3 + 2] = 0.97 * fade;
     }
 
-    this.scene.add(this.rotationRingGroup);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })));
+
+    // Arrowhead cone at the leading tip (angle 0), pointing in rotation direction
+    const coneGeo = new THREE.ConeGeometry(0.04, 0.14, 6);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: 0x4fc3f7, transparent: true, opacity: brightness,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(radius, 0, 0);
+    // Tangent at angle 0 in the counterclockwise direction
+    const tangent = new THREE.Vector3(0, 0, -1);
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+    group.add(cone);
+
+    return group;
   }
 
   private buildAxisLine(): void {
@@ -500,7 +521,7 @@ export class CosmicMotionApp {
     const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
     this.earth.quaternion.copy(tiltQuat);
     this.atmosphere.quaternion.copy(tiltQuat);
-    this.rotationRingGroup.quaternion.copy(tiltQuat);
+    this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
     this.ui.update({
@@ -668,12 +689,8 @@ export class CosmicMotionApp {
     );
     this.earth.quaternion.copy(tiltQuat).multiply(spinQuat);
 
-    // Rotation ring group spins to show rotation direction
-    this.rotationRingGroup.quaternion.copy(tiltQuat).multiply(
-      new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0), performance.now() * 0.0008,
-      ),
-    );
+    // Pole sweep chases around the north pole to show spin direction
+    this.northSweep.rotation.y = performance.now() * 0.0018;
 
     // Camera orbit: "behind Earth looking forward along trajectory"
     const fwd = this.forwardDir;
