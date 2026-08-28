@@ -67,8 +67,6 @@ export class CosmicMotionApp {
 
   private data!: SceneData;
   private ghostOffsetHours = 0;
-  private camTarget: 'now' | 'ghost' = 'now';
-  private camTargetPos = new THREE.Vector3();
   private ghostWorldPos = new THREE.Vector3();
   private controls!: OrbitControls;
   private needsDataUpdate = true;
@@ -121,9 +119,6 @@ export class CosmicMotionApp {
       onTimeChange: (hours) => {
         this.ghostOffsetHours = hours;
         this.updateGhost();
-      },
-      onToggleFollow: () => {
-        this.camTarget = this.camTarget === 'now' ? 'ghost' : 'now';
       },
     });
 
@@ -1074,12 +1069,6 @@ export class CosmicMotionApp {
     if (this.ghostGroup.visible) {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
-
-    // Camera target — smoothly follow NOW or GHOST Earth
-    const targetPos = this.camTarget === 'ghost' && this.ghostGroup.visible
-      ? this.ghostWorldPos : new THREE.Vector3(0, 0, 0);
-    this.camTargetPos.lerp(targetPos, 0.08);
-    this.controls.target.copy(this.camTargetPos);
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
