@@ -62,6 +62,8 @@ export class CosmicMotionApp {
   private orbitalRing!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
+  private sunTrajectoryPast!: THREE.Mesh;
+  private sunTrajectoryFuture!: THREE.Mesh;
 
   private data!: SceneData;
   private ghostOffsetHours = 0;
@@ -949,61 +951,82 @@ export class CosmicMotionApp {
     // Remove old trajectories
     if (this.trajectoryMesh) { this.scene.remove(this.trajectoryMesh); this.trajectoryMesh.geometry.dispose(); }
     if (this.trajectoryForwardMesh) { this.scene.remove(this.trajectoryForwardMesh); this.trajectoryForwardMesh.geometry.dispose(); }
+    if (this.trajectoryGlowPast) { this.scene.remove(this.trajectoryGlowPast); this.trajectoryGlowPast.geometry.dispose(); }
+    if (this.trajectoryGlowFuture) { this.scene.remove(this.trajectoryGlowFuture); this.trajectoryGlowFuture.geometry.dispose(); }
+    if (this.sunTrajectoryPast) { this.scene.remove(this.sunTrajectoryPast); this.sunTrajectoryPast.geometry.dispose(); }
+    if (this.sunTrajectoryFuture) { this.scene.remove(this.sunTrajectoryFuture); this.sunTrajectoryFuture.geometry.dispose(); }
 
     const pts = this.data.trajectory;
 
-    // Split into past (dayOffset <= 0) and future (dayOffset >= 0) with overlap at 0
+    // Split into past and future with overlap at 0
     const pastPts: THREE.Vector3[] = [];
     const futurePts: THREE.Vector3[] = [];
+    const sunPastPts: THREE.Vector3[] = [];
+    const sunFuturePts: THREE.Vector3[] = [];
 
     for (const pt of pts) {
-      const v = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
-      if (pt.dayOffset <= 0.01) pastPts.push(v);
-      if (pt.dayOffset >= -0.01) futurePts.push(v);
+      const earthV = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
+      const sunV = earthV.clone().add(eclToThree(pt.sunDir).multiplyScalar(SUN_DIST));
+      if (pt.dayOffset <= 0.01) { pastPts.push(earthV); sunPastPts.push(sunV); }
+      if (pt.dayOffset >= -0.01) { futurePts.push(earthV); sunFuturePts.push(sunV); }
     }
 
-    // Remove old glow tubes
-    if (this.trajectoryGlowPast) { this.scene.remove(this.trajectoryGlowPast); this.trajectoryGlowPast.geometry.dispose(); }
-    if (this.trajectoryGlowFuture) { this.scene.remove(this.trajectoryGlowFuture); this.trajectoryGlowFuture.geometry.dispose(); }
-
-    // Past trajectory — thin, fading purple thread
+    // Earth past trajectory — thin purple thread
     if (pastPts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(pastPts);
       const geo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.03, 6, false);
-      const mat = new THREE.MeshBasicMaterial({
+      this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0x9c6dff, transparent: true, opacity: 0.35,
         blending: THREE.AdditiveBlending, depthWrite: false,
-      });
-      this.trajectoryMesh = new THREE.Mesh(geo, mat);
+      }));
       this.scene.add(this.trajectoryMesh);
 
       const glowGeo = new THREE.TubeGeometry(curve, pastPts.length * 4, 0.12, 6, false);
-      const glowMat = new THREE.MeshBasicMaterial({
+      this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x7c4dff, transparent: true, opacity: 0.04,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-      });
-      this.trajectoryGlowPast = new THREE.Mesh(glowGeo, glowMat);
+      }));
       this.scene.add(this.trajectoryGlowPast);
     }
 
-    // Future trajectory — thin, brighter cyan thread
+    // Earth future trajectory — thin cyan thread
     if (futurePts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(futurePts);
       const geo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.04, 6, false);
-      const mat = new THREE.MeshBasicMaterial({
+      this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0x00e5ff, transparent: true, opacity: 0.45,
         blending: THREE.AdditiveBlending, depthWrite: false,
-      });
-      this.trajectoryForwardMesh = new THREE.Mesh(geo, mat);
+      }));
       this.scene.add(this.trajectoryForwardMesh);
 
       const glowGeo = new THREE.TubeGeometry(curve, futurePts.length * 4, 0.15, 6, false);
-      const glowMat = new THREE.MeshBasicMaterial({
+      this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
         color: 0x00bcd4, transparent: true, opacity: 0.05,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-      });
-      this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, glowMat);
+      }));
       this.scene.add(this.trajectoryGlowFuture);
+    }
+
+    // Sun past trajectory — warm golden thread
+    if (sunPastPts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(sunPastPts);
+      const geo = new THREE.TubeGeometry(curve, sunPastPts.length * 4, 0.025, 6, false);
+      this.sunTrajectoryPast = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0xffa726, transparent: true, opacity: 0.18,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      this.scene.add(this.sunTrajectoryPast);
+    }
+
+    // Sun future trajectory — warm golden thread
+    if (sunFuturePts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(sunFuturePts);
+      const geo = new THREE.TubeGeometry(curve, sunFuturePts.length * 4, 0.03, 6, false);
+      this.sunTrajectoryFuture = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0xffcc00, transparent: true, opacity: 0.22,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      this.scene.add(this.sunTrajectoryFuture);
     }
   }
 

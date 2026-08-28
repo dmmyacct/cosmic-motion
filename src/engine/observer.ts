@@ -22,6 +22,8 @@ export interface ObserverLocation {
 export interface TrajectoryPoint {
   /** Position relative to current Earth, ecliptic cartesian (AU) */
   pos: Vec3;
+  /** Sun direction from Earth at this time (ecliptic cartesian, unit vector) */
+  sunDir: Vec3;
   dayOffset: number;
 }
 
@@ -119,6 +121,7 @@ export function computeSceneData(
     const galacticDrift = vec3Scale(SOLAR_VEL_AU_DAY, dayOff / GALACTIC_VIS_COMPRESSION);
     trajectory.push({
       pos: vec3Add(helioOffset, galacticDrift),
+      sunDir: vec3Normalize(vec3Scale(pos, -1)),
       dayOffset: dayOff,
     });
   }
