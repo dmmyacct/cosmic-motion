@@ -561,20 +561,21 @@ export class CosmicMotionApp {
 
     this.locCard.position.copy(cardPos);
 
-    // Compute local time at this longitude
+    // Use the browser's actual local time — this is always correct
     const now = new Date();
-    const utcH = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
-    const localH = ((utcH + loc.lonDeg / 15) % 24 + 24) % 24;
-    const lh = Math.floor(localH);
-    const lm = Math.floor((localH - lh) * 60);
-    const ampm = lh >= 12 ? 'PM' : 'AM';
-    const h12 = lh % 12 || 12;
-    const localTimeStr = `${h12}:${String(lm).padStart(2, '0')} ${ampm}`;
+    const localTimeStr = now.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
 
-    // Sunset calculation: hour angle when sun altitude = -0.833° (atmospheric refraction)
-    const sunDir3 = eclToThree(this.data.sunDir).normalize();
-    const sunDirEarth = sunDir3.clone().applyQuaternion(earthQuat.clone().invert());
-    const sunDecl = Math.asin(sunDirEarth.y);
+    // Sun declination from ecliptic coordinates (independent of Earth spin)
+    // sunDir is in ecliptic cartesian. Convert to equatorial to get declination.
+    const sd = this.data.sunDir;
+    const eps = this.data.obliquity;
+    const sunEqY = sd[1] * Math.cos(eps) + sd[2] * Math.sin(eps);
+    const sunDecl = Math.asin(Math.max(-1, Math.min(1, sunEqY)));
+
+    // Hour angle at sunset: cos(H) = (sin(h0) - sin(lat)*sin(dec)) / (cos(lat)*cos(dec))
+    // h0 = -0.833° = -0.01454 rad (standard refraction correction)
     const cosHA = (Math.sin(-0.01454) - Math.sin(latRad) * Math.sin(sunDecl))
       / (Math.cos(latRad) * Math.cos(sunDecl));
 
@@ -584,34 +585,44 @@ export class CosmicMotionApp {
     } else if (cosHA < -1) {
       sunsetStr = 'No sunset (midnight sun)';
     } else {
-      const haSet = Math.acos(cosHA) * 12 / Math.PI; // hours from solar noon
-      // Solar noon in local solar time = 12:00, convert to local time
-      // Equation of time approximation
-      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400_000);
-      const B = (360 / 365) * (dayOfYear - 81) * Math.PI / 180;
-      const eqOfTime = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B); // minutes
-      const solarNoonUTC = 12 - loc.lonDeg / 15 - eqOfTime / 60;
-      const sunsetUTC = solarNoonUTC + haSet;
-      const sunsetLocal = ((sunsetUTC + loc.lonDeg / 15) % 24 + 24) % 24;
+      const haSet = Math.acos(cosHA); // radians
 
-      // Time until sunset
-      const hoursUntil = ((sunsetLocal - localH) % 24 + 24) % 24;
-      if (hoursUntil < 0.05) {
-        sunsetStr = 'Sunset now';
-      } else if (hoursUntil > 23.5) {
-        sunsetStr = 'Sunset now';
+      // Equation of time for solar noon correction
+      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400_000);
+      const B = (2 * Math.PI / 365) * (dayOfYear - 81);
+      const eqOfTime = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B); // minutes
+
+      // Sunset time in UTC hours
+      const solarNoonUTC = 12 - loc.lonDeg / 15 - eqOfTime / 60;
+      const sunsetUTC = solarNoonUTC + haSet * (12 / Math.PI);
+
+      // Convert to local Date for accurate comparison
+      const sunsetDate = new Date(now);
+      sunsetDate.setUTCHours(0, 0, 0, 0);
+      sunsetDate.setTime(sunsetDate.getTime() + sunsetUTC * 3600_000);
+
+      // If sunset already passed today, show tomorrow's
+      let diffMs = sunsetDate.getTime() - now.getTime();
+      if (diffMs < -600_000) { // more than 10 min ago
+        diffMs += 86400_000;
+      }
+
+      if (diffMs < 0) {
+        sunsetStr = 'Sun has set';
       } else {
-        const uh = Math.floor(hoursUntil);
-        const um = Math.round((hoursUntil - uh) * 60);
+        const totalMin = Math.round(diffMs / 60_000);
+        const uh = Math.floor(totalMin / 60);
+        const um = totalMin % 60;
         sunsetStr = uh > 0 ? `Sunset in ${uh}h ${um}m` : `Sunset in ${um}m`;
       }
     }
 
     const latStr = `${Math.abs(loc.latDeg).toFixed(2)}°${loc.latDeg >= 0 ? 'N' : 'S'}`;
     const lonStr = `${Math.abs(loc.lonDeg).toFixed(2)}°${loc.lonDeg >= 0 ? 'E' : 'W'}`;
+    const locLabel = this.locationService.hasRealLocation ? '' : '  (default)';
 
     this.updateLocCard(
-      `${latStr}  ${lonStr}  ·  ${localTimeStr}`,
+      `${latStr}  ${lonStr}${locLabel}  ·  ${localTimeStr}`,
       sunsetStr,
     );
   }
