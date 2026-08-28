@@ -78,9 +78,8 @@ export class CosmicMotionApp {
 
     this.scene = new THREE.Scene();
 
-    // Subtle ambient + hemisphere for depth
-    this.scene.add(new THREE.AmbientLight(0x1a1a2e, 0.6));
-    this.scene.add(new THREE.HemisphereLight(0x2244aa, 0x111122, 0.3));
+    this.scene.add(new THREE.AmbientLight(0x1a1a2e, 0.15));
+    this.scene.add(new THREE.HemisphereLight(0x2244aa, 0x111122, 0.1));
 
     this.buildStarfield();
     this.buildEarth();
@@ -205,9 +204,11 @@ export class CosmicMotionApp {
       vertexShader: `
         varying vec2 vUv;
         varying vec3 vWorldNormal;
+        varying vec3 vWorldPos;
         void main() {
           vUv = uv;
           vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
@@ -217,13 +218,23 @@ export class CosmicMotionApp {
         uniform sampler2D nightMap;
         varying vec2 vUv;
         varying vec3 vWorldNormal;
+        varying vec3 vWorldPos;
         void main() {
           vec3 sunDir = normalize(sunDirection);
           float NdotL = dot(vWorldNormal, sunDir);
           float dayFactor = smoothstep(-0.12, 0.2, NdotL);
 
           vec3 dayColor = texture2D(dayMap, vUv).rgb;
-          dayColor *= (0.55 + 0.45 * max(0.0, NdotL));
+          float diffuse = 0.12 + 0.88 * max(0.0, NdotL);
+          dayColor *= diffuse;
+
+          // Specular highlight — strongest on oceans (dark/blue areas)
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+          vec3 halfDir = normalize(sunDir + viewDir);
+          float spec = pow(max(0.0, dot(vWorldNormal, halfDir)), 50.0);
+          float rawLum = dot(texture2D(dayMap, vUv).rgb, vec3(0.299, 0.587, 0.114));
+          float waterMask = 1.0 - smoothstep(0.08, 0.25, rawLum);
+          dayColor += vec3(0.7, 0.65, 0.5) * spec * waterMask * 0.4 * max(0.0, NdotL);
 
           vec3 nightColor = texture2D(nightMap, vUv).rgb * 1.4;
 
@@ -351,10 +362,30 @@ export class CosmicMotionApp {
 
   private buildMoon(): void {
     const geo = new THREE.SphereGeometry(EARTH_R * 0.27, 32, 32);
-    const mat = new THREE.MeshPhongMaterial({
-      color: 0xb8b8b8, emissive: 0x222222, emissiveIntensity: 0.15, shininess: 5,
+    const moonMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+      },
+      vertexShader: `
+        varying vec3 vWorldNormal;
+        void main() {
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        varying vec3 vWorldNormal;
+        void main() {
+          vec3 sunDir = normalize(sunDirection);
+          float NdotL = dot(vWorldNormal, sunDir);
+          float lit = 0.02 + 0.98 * max(0.0, NdotL);
+          vec3 color = vec3(0.72, 0.71, 0.68) * lit;
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
     });
-    this.moonMesh = new THREE.Mesh(geo, mat);
+    this.moonMesh = new THREE.Mesh(geo, moonMat);
     this.scene.add(this.moonMesh);
 
     // Moon orbital path (simplified circle at MOON_DIST)
@@ -537,6 +568,7 @@ export class CosmicMotionApp {
     (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.clouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
+    (this.moonMesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
 
     // Sun beam from Earth toward Sun
     const beamArr = new Float32Array([
