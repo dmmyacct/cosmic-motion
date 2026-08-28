@@ -188,7 +188,7 @@ canvas { display: block; }
   bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(400px, calc(100% - 48px));
+  width: min(600px, calc(100% - 48px));
   text-align: center;
   pointer-events: auto;
 }
@@ -209,7 +209,7 @@ canvas { display: block; }
   width: 100%;
   -webkit-appearance: none;
   appearance: none;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(90deg,
     rgba(124, 77, 255, 0.3),
     rgba(255, 255, 255, 0.12) 50%,

@@ -33,10 +33,57 @@ const SIDEREAL_DAY_H = 23.9345;
 
 const MAX_HOURS = 876000; // 100 years
 
+// Piecewise slider mapping — generous room for short timelines, compressed for long ones
+// |slider %|  0─40%  → ±0 to ±24h (1 day)
+// |slider %| 40─65%  → ±1d to ±30d (1 month)
+// |slider %| 65─85%  → ±30d to ±365d (1 year)
+// |slider %| 85─100% → ±1yr to ±100yr
+const SLIDER_BANDS: Array<[number, number]> = [
+  // [sliderFraction, hours]
+  [0.00,       0],
+  [0.40,      24],
+  [0.65,     720],      // 30 days
+  [0.85,    8766],      // ~1 year
+  [1.00,  MAX_HOURS],
+];
+
 function sliderToHours(t: number): number {
   const sign = Math.sign(t);
   const abs = Math.abs(t);
-  return sign * (Math.expm1(abs * 7) / Math.expm1(7)) * MAX_HOURS;
+
+  for (let i = 1; i < SLIDER_BANDS.length; i++) {
+    const [s0, h0] = SLIDER_BANDS[i - 1];
+    const [s1, h1] = SLIDER_BANDS[i];
+    if (abs <= s1) {
+      const frac = (abs - s0) / (s1 - s0);
+      const smooth = frac * frac * (3 - 2 * frac); // smoothstep for no dead zones
+      return sign * (h0 + smooth * (h1 - h0));
+    }
+  }
+  return sign * MAX_HOURS;
+}
+
+function hoursToSlider(hours: number): number {
+  const sign = Math.sign(hours);
+  const abs = Math.abs(hours);
+
+  for (let i = 1; i < SLIDER_BANDS.length; i++) {
+    const [s0, h0] = SLIDER_BANDS[i - 1];
+    const [s1, h1] = SLIDER_BANDS[i];
+    if (abs <= h1) {
+      const frac = (abs - h0) / (h1 - h0);
+      // Inverse of smoothstep: solve t^2*(3-2t) = frac via Newton's method
+      let t = frac;
+      for (let j = 0; j < 8; j++) {
+        const f = t * t * (3 - 2 * t) - frac;
+        const df = 6 * t * (1 - t);
+        if (Math.abs(df) < 1e-12) break;
+        t -= f / df;
+      }
+      return sign * (s0 + t * (s1 - s0));
+    }
+  }
+  return sign;
 }
 
 function formatOffset(hours: number): string {
@@ -195,7 +242,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <span class="cm-time-current">Now</span>
       <span class="cm-time-future">+ 100 yrs</span>
     </div>
-    <input type="range" class="cm-time-slider" min="-100" max="100" step="0.1" value="0" />
+    <input type="range" class="cm-time-slider" min="-1000" max="1000" step="1" value="0" />
     <div class="cm-time-info">
       <span class="cm-time-offset"></span>
       <span class="cm-ghost-date"></span>
@@ -255,7 +302,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   }
 
   slider.addEventListener('input', () => {
-    emitChange(sliderToHours(parseFloat(slider.value) / 100));
+    emitChange(sliderToHours(parseFloat(slider.value) / 1000));
   });
   slider.addEventListener('dblclick', () => { slider.value = '0'; emitChange(0); });
 
@@ -369,6 +416,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       lastPlayTime = now;
       currentHoursOffset += playDirection * PLAY_SPEEDS[speedIndex].hoursPerSec * dt;
       currentHoursOffset = Math.max(-MAX_HOURS, Math.min(MAX_HOURS, currentHoursOffset));
+      slider.value = String(hoursToSlider(currentHoursOffset) * 1000);
       callbacks.onTimeChange(currentHoursOffset);
       updateTimeDisplay(currentHoursOffset);
     },
