@@ -67,6 +67,7 @@ export class CosmicMotionApp {
 
   private data!: SceneData;
   private ghostOffsetHours = 0;
+  private followGhost = false;
   private ghostWorldPos = new THREE.Vector3();
   private controls!: OrbitControls;
   private needsDataUpdate = true;
@@ -119,6 +120,9 @@ export class CosmicMotionApp {
       onTimeChange: (hours) => {
         this.ghostOffsetHours = hours;
         this.updateGhost();
+      },
+      onToggleFollow: () => {
+        this.followGhost = !this.followGhost;
       },
     });
 
@@ -1068,6 +1072,13 @@ export class CosmicMotionApp {
     // Ghost sweep spins too
     if (this.ghostGroup.visible) {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
+    }
+
+    // Smoothly move orbit target when following ghost
+    if (this.followGhost && this.ghostGroup.visible) {
+      this.controls.target.lerp(this.ghostWorldPos, 0.06);
+    } else if (!this.followGhost) {
+      this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.06);
     }
 
     this.controls.update();
