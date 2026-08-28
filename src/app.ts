@@ -1078,18 +1078,10 @@ export class CosmicMotionApp {
     }
 
     if (this.followGhost && this.ghostGroup.visible) {
-      // Keep orbit center on ghost Sun so you're always looking at it
-      this.controls.target.lerp(this.ghostSunWorldPos, 0.08);
-
-      // Initial transition: smoothly move camera behind ghost Earth
-      if (this.followTransition > 0) {
-        const toSun = this.ghostSunWorldPos.clone().sub(this.ghostWorldPos).normalize();
-        const behindEarth = this.ghostWorldPos.clone().add(toSun.multiplyScalar(-12));
-        behindEarth.y = this.ghostWorldPos.y + 4;
-        const t = Math.min(0.06, this.followTransition);
-        this.camera.position.lerp(behindEarth, t);
-        this.followTransition -= 0.01;
-      }
+      // Move orbit center + camera with the ghost Earth so user rides along
+      const delta = this.ghostWorldPos.clone().sub(this.controls.target);
+      this.controls.target.copy(this.ghostWorldPos);
+      this.camera.position.add(delta);
     } else if (!this.followGhost) {
       this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.06);
     }
