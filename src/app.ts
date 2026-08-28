@@ -121,11 +121,11 @@ export class CosmicMotionApp {
     this.scene.add(this.sunBeam);
 
     this.sunDistLabel = this.makeDistLabel();
-    this.sunDistLabel.scale.set(6, 0.6, 1);
+    this.sunDistLabel.scale.set(8, 1, 1);
     this.scene.add(this.sunDistLabel);
 
     this.moonDistLabel = this.makeDistLabel();
-    this.moonDistLabel.scale.set(4, 0.4, 1);
+    this.moonDistLabel.scale.set(5, 0.65, 1);
     this.scene.add(this.moonDistLabel);
 
     this.ui = createUI(container, {
@@ -806,8 +806,8 @@ export class CosmicMotionApp {
     this.orbitalRing.position.copy(sunPos);
 
     // Sun distance label — along beam
-    const sunMid = sunPos.clone().multiplyScalar(0.45);
-    sunMid.y += 1.5;
+    const sunMid = sunPos.clone().multiplyScalar(0.4);
+    sunMid.y += 2;
     this.sunDistLabel.position.copy(sunMid);
     const sunKm = this.data.sunDistAU * 149597870.7;
     const lightSec = sunKm / 299792.458;
@@ -815,8 +815,8 @@ export class CosmicMotionApp {
     const lightS = Math.round(lightSec % 60);
     this.updateDistLabel(
       this.sunDistLabel,
-      `${(sunKm / 1e6).toFixed(1)}M km  ·  ${lightMin}m ${lightS}s`,
-      'rgba(255,220,130,0.4)',
+      `☉  ${(sunKm / 1e6).toFixed(1)}M km  ·  ${lightMin}m ${String(lightS).padStart(2, '0')}s light`,
+      'rgba(255, 230, 160, 0.85)',
     );
 
     // Moon
@@ -824,12 +824,12 @@ export class CosmicMotionApp {
     this.moonMesh.position.copy(moonPos);
 
     const moonLabelPos = moonPos.clone();
-    moonLabelPos.y += EARTH_R * 0.6;
+    moonLabelPos.y += EARTH_R * 0.7;
     this.moonDistLabel.position.copy(moonLabelPos);
     this.updateDistLabel(
       this.moonDistLabel,
-      `${Math.round(this.data.moonDistKm).toLocaleString()} km`,
-      'rgba(200,200,195,0.35)',
+      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km`,
+      'rgba(220, 220, 215, 0.8)',
     );
 
     // Earth tilt
@@ -1090,7 +1090,7 @@ export class CosmicMotionApp {
 
   private makeDistLabel(): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 48;
+    canvas.width = 640; canvas.height = 80;
     const tex = new THREE.CanvasTexture(canvas);
     tex.minFilter = THREE.LinearFilter;
     return new THREE.Sprite(new THREE.SpriteMaterial({
@@ -1098,17 +1098,19 @@ export class CosmicMotionApp {
     }));
   }
 
-  private updateDistLabel(sprite: THREE.Sprite, text: string, color = 'rgba(255,255,255,0.45)'): void {
+  private updateDistLabel(sprite: THREE.Sprite, text: string, color = 'rgba(255,255,255,0.75)'): void {
     const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 48;
+    canvas.width = 640; canvas.height = 80;
     const ctx = canvas.getContext('2d')!;
-    ctx.font = '300 20px -apple-system, system-ui, sans-serif';
+    ctx.font = '500 28px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,1)';
+    ctx.shadowBlur = 16;
     ctx.fillStyle = color;
-    ctx.fillText(text, 256, 24);
+    ctx.fillText(text, 320, 40);
+    ctx.shadowBlur = 8;
+    ctx.fillText(text, 320, 40);
     const tex = new THREE.CanvasTexture(canvas);
     tex.minFilter = THREE.LinearFilter;
     const mat = sprite.material as THREE.SpriteMaterial;
