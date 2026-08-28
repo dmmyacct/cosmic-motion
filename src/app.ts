@@ -46,6 +46,9 @@ export class CosmicMotionApp {
   private ghostAxisLine!: THREE.Line;
   private ghostSweep!: THREE.Group;
   private ghostSunBeam!: THREE.Line;
+  private ghostSunSprite!: THREE.Sprite;
+  private ghostSunGlow!: THREE.Sprite;
+  private ghostSunLabel!: THREE.Sprite;
   private ghostLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
@@ -727,6 +730,45 @@ export class CosmicMotionApp {
     }));
     this.ghostGroup.add(this.ghostSunBeam);
 
+    // Ghost Sun — smaller, semi-transparent version of the Sun sprite
+    const ghostSunCanvas = document.createElement('canvas');
+    ghostSunCanvas.width = 128; ghostSunCanvas.height = 128;
+    const gsCtx = ghostSunCanvas.getContext('2d')!;
+    const gsGrad = gsCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gsGrad.addColorStop(0, 'rgba(255,252,230,0.6)');
+    gsGrad.addColorStop(0.1, 'rgba(255,220,100,0.5)');
+    gsGrad.addColorStop(0.35, 'rgba(255,170,0,0.2)');
+    gsGrad.addColorStop(1, 'rgba(255,120,0,0)');
+    gsCtx.fillStyle = gsGrad;
+    gsCtx.fillRect(0, 0, 128, 128);
+    this.ghostSunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(ghostSunCanvas),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.ghostSunSprite.scale.set(10, 10, 1);
+    this.ghostGroup.add(this.ghostSunSprite);
+
+    const ghostGlowCanvas = document.createElement('canvas');
+    ghostGlowCanvas.width = 256; ghostGlowCanvas.height = 256;
+    const ggCtx = ghostGlowCanvas.getContext('2d')!;
+    const ggGrad = ggCtx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    ggGrad.addColorStop(0, 'rgba(255,230,120,0.1)');
+    ggGrad.addColorStop(0.2, 'rgba(255,200,60,0.04)');
+    ggGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ggCtx.fillStyle = ggGrad;
+    ggCtx.fillRect(0, 0, 256, 256);
+    this.ghostSunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(ghostGlowCanvas),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.ghostSunGlow.scale.set(35, 35, 1);
+    this.ghostGroup.add(this.ghostSunGlow);
+
+    this.ghostSunLabel = this.makeLabelSprite('☉', '#ffd54f');
+    this.ghostSunLabel.scale.set(1.0, 0.5, 1);
+    this.ghostSunLabel.material.opacity = 0.5;
+    this.ghostGroup.add(this.ghostSunLabel);
+
     // Ghost date/time label
     this.ghostLabel = this.makeLabelSprite('', '#ffffff');
     this.ghostLabel.scale.set(2.5, 0.6, 1);
@@ -857,11 +899,17 @@ export class CosmicMotionApp {
     (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
     (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
 
-    // Ghost sun beam — from ghost Earth toward the Sun
-    const ghostSunPos = eclToThree(ghostData.sunDir).multiplyScalar(SUN_DIST);
+    // Ghost Sun — positioned relative to ghost Earth
+    const ghostSunOffset = eclToThree(ghostData.sunDir).multiplyScalar(SUN_DIST);
+    const ghostSunWorldPos = ghostPos.clone().add(ghostSunOffset);
+    this.ghostSunSprite.position.copy(ghostSunWorldPos);
+    this.ghostSunGlow.position.copy(ghostSunWorldPos);
+    this.ghostSunLabel.position.copy(ghostSunWorldPos).add(new THREE.Vector3(0, 4, 0));
+
+    // Ghost sun beam — from ghost Earth toward ghost Sun
     const beamArr = new Float32Array([
       ghostPos.x, ghostPos.y, ghostPos.z,
-      ghostSunPos.x, ghostSunPos.y, ghostSunPos.z,
+      ghostSunWorldPos.x, ghostSunWorldPos.y, ghostSunWorldPos.z,
     ]);
     this.ghostSunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
