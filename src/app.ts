@@ -71,7 +71,9 @@ export class CosmicMotionApp {
   private orbitalRing!: THREE.Line;
   private locMarker!: THREE.Group;
   private locDot!: THREE.Mesh;
+  private locOverlay!: HTMLElement;
   private locVisible = true;
+  private _locLastUpdate = 0;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
   private sunTrajectoryPast!: THREE.Mesh;
@@ -491,7 +493,6 @@ export class CosmicMotionApp {
   private buildLocationMarker(): void {
     this.locMarker = new THREE.Group();
 
-    // Small glowing dot on Earth surface
     const dotGeo = new THREE.SphereGeometry(0.02, 12, 12);
     const dotMat = new THREE.MeshBasicMaterial({
       color: 0x00ff88, transparent: true, opacity: 0.9,
@@ -499,13 +500,22 @@ export class CosmicMotionApp {
     });
     this.locDot = new THREE.Mesh(dotGeo, dotMat);
     this.locMarker.add(this.locDot);
-
     this.scene.add(this.locMarker);
+
+    // HTML overlay — projected from 3D to screen each frame
+    this.locOverlay = document.createElement('div');
+    this.locOverlay.className = 'cm-loc-overlay';
+    this.locOverlay.innerHTML = `
+      <div class="cm-loc-line1"></div>
+      <div class="cm-loc-line2"></div>
+    `;
+    document.getElementById('app')!.appendChild(this.locOverlay);
   }
 
   private updateLocationMarker(): void {
     if (!this.data || !this.locMarker) return;
     this.locMarker.visible = this.locVisible;
+    this.locOverlay.style.display = this.locVisible ? '' : 'none';
     if (!this.locVisible) return;
 
     const loc = this.locationService.location;
@@ -527,7 +537,39 @@ export class CosmicMotionApp {
       this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
     );
     const earthQuat = tiltQuat.clone().multiply(spinQuat);
-    this.locDot.position.copy(surfacePos.clone().applyQuaternion(earthQuat));
+    const worldPos = surfacePos.clone().applyQuaternion(earthQuat);
+    this.locDot.position.copy(worldPos);
+
+    // Project 3D position to screen — hide if behind Earth
+    const dotDir = worldPos.clone().normalize();
+    const camDir = this.camera.position.clone().normalize();
+    const facing = dotDir.dot(camDir) > -0.1;
+
+    if (!facing) {
+      this.locOverlay.style.opacity = '0';
+      return;
+    }
+    this.locOverlay.style.opacity = '1';
+
+    const projected = worldPos.clone().add(dotDir.multiplyScalar(0.15));
+    projected.project(this.camera);
+    const hw = window.innerWidth / 2;
+    const hh = window.innerHeight / 2;
+    const sx = projected.x * hw + hw;
+    const sy = -projected.y * hh + hh;
+    this.locOverlay.style.transform = `translate(${sx}px, ${sy}px)`;
+
+    // Update text content (throttled — every ~500ms)
+    const now = performance.now();
+    if (!this._locLastUpdate || now - this._locLastUpdate > 500) {
+      this._locLastUpdate = now;
+      const locData = this.computeLocationData();
+      const l1 = this.locOverlay.querySelector('.cm-loc-line1')!;
+      const l2 = this.locOverlay.querySelector('.cm-loc-line2')!;
+      const dflt = locData.isDefault ? ' ~' : '';
+      l1.textContent = `${locData.latStr} ${locData.lonStr}${dflt} · ${locData.localTime}`;
+      l2.textContent = locData.sunset;
+    }
   }
 
   private computeLocationData(): { latStr: string; lonStr: string; localTime: string; sunset: string; isDefault: boolean } {
@@ -1033,8 +1075,6 @@ export class CosmicMotionApp {
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
-    const locData = this.locVisible ? this.computeLocationData() : null;
-
     this.ui.update({
       speedKmS: this.data.speedKmS,
       orbitalSpeedKmS: this.data.orbitalSpeedKmS,
@@ -1046,12 +1086,6 @@ export class CosmicMotionApp {
       obliquity: this.data.obliquity,
       rotationAngle: this.data.rotationAngle,
       date: new Date(),
-      locVisible: this.locVisible,
-      locLatStr: locData?.latStr,
-      locLonStr: locData?.lonStr,
-      locLocalTime: locData?.localTime,
-      locSunset: locData?.sunset,
-      locIsDefault: locData?.isDefault,
     });
     this.updateGhost();
   }

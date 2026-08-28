@@ -107,10 +107,38 @@ canvas { display: block; }
 .cm-sun-section > .cm-body-header { color: rgba(255, 210, 100, 0.85); }
 .cm-earth-section > .cm-body-header { color: rgba(100, 200, 255, 0.8); }
 .cm-moon-section > .cm-body-header { color: rgba(200, 200, 195, 0.7); }
-.cm-loc-section > .cm-body-header { color: rgba(0, 255, 136, 0.7); }
-.cm-loc-icon { font-size: 10px; }
-
 .cm-body-stats { margin-bottom: 8px; }
+
+/* ── Location overlay (projected from 3D) ── */
+
+.cm-loc-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 15;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+
+.cm-loc-line1 {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: -0.2px;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 1);
+  margin-bottom: 2px;
+  margin-left: 10px;
+}
+
+.cm-loc-line2 {
+  font-size: 9px;
+  font-family: var(--font);
+  color: rgba(0, 255, 136, 0.55);
+  letter-spacing: 0.3px;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 1);
+  margin-left: 10px;
+}
 
 .cm-sun-section > .cm-body-section {
   padding-left: 14px;
@@ -126,9 +154,6 @@ canvas { display: block; }
   margin-top: 6px;
 }
 
-.cm-loc-section {
-  margin-top: 8px;
-}
 
 .cm-stat {
   display: flex;
