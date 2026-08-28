@@ -4,6 +4,7 @@
 
 export interface UICallbacks {
   onTimeChange: (hours: number) => void;
+  onToggleFollow: () => void;
 }
 
 export interface UIUpdateData {
@@ -88,6 +89,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-play-btn" title="Play/Pause">▶</button>
       <button class="cm-rev-btn" title="Reverse">◀</button>
       <button class="cm-speed-btn" title="Playback speed">1 hr/s</button>
+      <button class="cm-follow-btn" title="Follow ghost / now">Follow: Now</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
   `;
@@ -99,6 +101,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const playBtn = timePanel.querySelector('.cm-play-btn') as HTMLButtonElement;
   const revBtn = timePanel.querySelector('.cm-rev-btn') as HTMLButtonElement;
   const speedBtn = timePanel.querySelector('.cm-speed-btn') as HTMLButtonElement;
+  const followBtn = timePanel.querySelector('.cm-follow-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
   let currentHoursOffset = 0;
@@ -106,6 +109,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   let playDirection = 1;
   let speedIndex = 1;
   let lastPlayTime = 0;
+  let followingGhost = false;
 
   function emitChange(hours: number): void {
     currentHoursOffset = hours;
@@ -164,7 +168,17 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     speedBtn.textContent = PLAY_SPEEDS[speedIndex].label;
   });
 
+  followBtn.addEventListener('click', () => {
+    followingGhost = !followingGhost;
+    followBtn.textContent = followingGhost ? 'Follow: Ghost' : 'Follow: Now';
+    followBtn.classList.toggle('active', followingGhost);
+    callbacks.onToggleFollow();
+  });
+
   resetBtn.addEventListener('click', () => {
+    followingGhost = false;
+    followBtn.textContent = 'Follow: Now';
+    followBtn.classList.remove('active');
     playing = false;
     playBtn.textContent = '▶';
     revBtn.classList.remove('active');

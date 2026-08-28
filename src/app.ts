@@ -59,6 +59,9 @@ export class CosmicMotionApp {
 
   private data!: SceneData;
   private ghostOffsetHours = 0;
+  private camTarget: 'now' | 'ghost' = 'now';
+  private camTargetPos = new THREE.Vector3();
+  private ghostWorldPos = new THREE.Vector3();
   private camAzimuth = 0.4;
   private camElevation = 0.45;
   private camDist = 12;
@@ -113,6 +116,9 @@ export class CosmicMotionApp {
       onTimeChange: (hours) => {
         this.ghostOffsetHours = hours;
         this.updateGhost();
+      },
+      onToggleFollow: () => {
+        this.camTarget = this.camTarget === 'now' ? 'ghost' : 'now';
       },
     });
 
@@ -749,7 +755,8 @@ export class CosmicMotionApp {
       ghostPos = eclToThree(closest.pos).multiplyScalar(AU_TO_SCENE);
     }
 
-    // Position the ghost group
+    // Position the ghost group + store for camera tracking
+    this.ghostWorldPos.copy(ghostPos);
     this.ghostEarth.position.copy(ghostPos);
     this.ghostClouds.position.copy(ghostPos);
     this.ghostAtmo.position.copy(ghostPos);
@@ -970,7 +977,12 @@ export class CosmicMotionApp {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
 
-    // Camera orbit: "behind Earth looking forward along trajectory"
+    // Camera target — smoothly follow NOW or GHOST Earth
+    const targetPos = this.camTarget === 'ghost' && this.ghostGroup.visible
+      ? this.ghostWorldPos : new THREE.Vector3(0, 0, 0);
+    this.camTargetPos.lerp(targetPos, 0.08);
+
+    // Camera orbit around target
     const fwd = this.forwardDir;
     const worldUp = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(fwd, worldUp).normalize();
@@ -981,7 +993,6 @@ export class CosmicMotionApp {
     const el = this.camElevation;
     const d = this.camDist;
 
-    // Spherical offset in the fwd/right/up frame
     const camOffset = new THREE.Vector3()
       .addScaledVector(fwd, -Math.cos(el) * Math.cos(az))
       .addScaledVector(right, Math.cos(el) * Math.sin(az))
@@ -989,8 +1000,8 @@ export class CosmicMotionApp {
       .normalize()
       .multiplyScalar(d);
 
-    this.camera.position.copy(camOffset);
-    this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+    this.camera.position.copy(this.camTargetPos).add(camOffset);
+    this.camera.lookAt(this.camTargetPos);
 
     this.renderer.render(this.scene, this.camera);
   };
