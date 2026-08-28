@@ -1109,54 +1109,69 @@ export class CosmicMotionApp {
 
     const pts = this.data.trajectory;
 
-    // Split Earth trajectory into past and future
-    const pastPts: THREE.Vector3[] = [];
-    const futurePts: THREE.Vector3[] = [];
-
-    for (const pt of pts) {
-      const earthV = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
-      if (pt.dayOffset <= 0.01) pastPts.push(earthV);
-      if (pt.dayOffset >= -0.01) futurePts.push(earthV);
+    // Build ONE continuous curve from all trajectory points, then uniformly sample
+    // and split at "now" for color. This ensures perfectly smooth tangents everywhere.
+    const allPts: THREE.Vector3[] = [];
+    let nowIndex = 0;
+    for (let i = 0; i < pts.length; i++) {
+      allPts.push(eclToThree(pts[i].pos).multiplyScalar(AU_TO_SCENE));
+      if (pts[i].dayOffset <= 0) nowIndex = i;
     }
 
-    // Earth past trajectory — thin purple thread
-    if (pastPts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
-      const segs = Math.min(pastPts.length * 4, 512);
-      const geo = new THREE.TubeGeometry(curve, segs, 0.03, 6, false);
-      this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0x9c6dff, transparent: true, opacity: 0.35,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.scene.add(this.trajectoryMesh);
+    if (allPts.length >= 4) {
+      const masterCurve = new THREE.CatmullRomCurve3(allPts, false, 'centripetal');
 
-      const glowCurve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
-      const glowGeo = new THREE.TubeGeometry(glowCurve, segs, 0.12, 6, false);
-      this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-        color: 0x7c4dff, transparent: true, opacity: 0.04,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-      }));
-      this.scene.add(this.trajectoryGlowPast);
-    }
+      // Uniformly sample the master curve
+      const totalSamples = 1024;
+      const sampled = masterCurve.getSpacedPoints(totalSamples);
 
-    // Earth future trajectory — thin cyan thread
-    if (futurePts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
-      const segsF = Math.min(futurePts.length * 4, 512);
-      const geo = new THREE.TubeGeometry(curve, segsF, 0.04, 6, false);
-      this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0x00e5ff, transparent: true, opacity: 0.45,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.scene.add(this.trajectoryForwardMesh);
+      // Find the sample closest to "now" (origin)
+      let splitIdx = 0;
+      let minDist = Infinity;
+      for (let i = 0; i < sampled.length; i++) {
+        const d = sampled[i].lengthSq();
+        if (d < minDist) { minDist = d; splitIdx = i; }
+      }
 
-      const glowCurveF = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
-      const glowGeo = new THREE.TubeGeometry(glowCurveF, segsF, 0.15, 6, false);
-      this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-        color: 0x00bcd4, transparent: true, opacity: 0.05,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
-      }));
-      this.scene.add(this.trajectoryGlowFuture);
+      // Past: samples 0..splitIdx (inclusive, with 1 overlap for continuity)
+      const pastPts = sampled.slice(0, splitIdx + 1);
+      const futurePts = sampled.slice(splitIdx);
+
+      if (pastPts.length >= 2) {
+        const pastCurve = new THREE.CatmullRomCurve3(pastPts, false, 'centripetal');
+        const segs = Math.min(256, pastPts.length);
+        const geo = new THREE.TubeGeometry(pastCurve, segs, 0.03, 6, false);
+        this.trajectoryMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+          color: 0x9c6dff, transparent: true, opacity: 0.35,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this.scene.add(this.trajectoryMesh);
+
+        const glowGeo = new THREE.TubeGeometry(pastCurve, segs, 0.12, 6, false);
+        this.trajectoryGlowPast = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
+          color: 0x7c4dff, transparent: true, opacity: 0.04,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+        }));
+        this.scene.add(this.trajectoryGlowPast);
+      }
+
+      if (futurePts.length >= 2) {
+        const futureCurve = new THREE.CatmullRomCurve3(futurePts, false, 'centripetal');
+        const segsF = Math.min(256, futurePts.length);
+        const geo = new THREE.TubeGeometry(futureCurve, segsF, 0.04, 6, false);
+        this.trajectoryForwardMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+          color: 0x00e5ff, transparent: true, opacity: 0.45,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this.scene.add(this.trajectoryForwardMesh);
+
+        const glowGeo = new THREE.TubeGeometry(futureCurve, segsF, 0.15, 6, false);
+        this.trajectoryGlowFuture = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
+          color: 0x00bcd4, transparent: true, opacity: 0.05,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+        }));
+        this.scene.add(this.trajectoryGlowFuture);
+      }
     }
 
     // Sun trajectory — straight line through the primary Sun in galactic direction.
