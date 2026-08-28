@@ -193,6 +193,12 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   ui.appendChild(hint);
   setTimeout(() => { hint.style.opacity = '0'; }, 8000);
 
+  // Scale note — honest about compression
+  const scaleNote = document.createElement('div');
+  scaleNote.className = 'cm-scale-note';
+  scaleNote.textContent = 'Galactic drift 8× compressed · Orbit and directions accurate';
+  ui.appendChild(scaleNote);
+
   return {
     update(data: UIUpdateData) {
       const speed = header.querySelector('.cm-header-speed')!;

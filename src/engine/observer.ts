@@ -26,17 +26,21 @@ export interface TrajectoryPoint {
 }
 
 export interface SceneData {
-  /** Earth's velocity direction (ecliptic cartesian, unit vector) */
+  /** Earth's velocity direction (ecliptic cartesian, unit vector) — true, including galactic */
   velocityDir: Vec3;
-  /** Earth's orbital speed (km/s) */
+  /** Earth's total speed through space (km/s) — orbital + galactic */
   speedKmS: number;
+  /** Earth's orbital velocity direction (ecliptic, unit vector) — heliocentric only */
+  orbitalVelocityDir: Vec3;
+  /** Earth's orbital speed (km/s) — heliocentric only */
+  orbitalSpeedKmS: number;
   /** Earth's rotation axis direction (ecliptic cartesian, unit vector) */
   axisDir: Vec3;
   /** Greenwich Mean Sidereal Time (radians) — Earth's rotation angle */
   rotationAngle: number;
   /** Obliquity of the ecliptic (radians) */
   obliquity: number;
-  /** Trajectory points ±N days */
+  /** Trajectory points ±N days (galactic drift compressed for visualization) */
   trajectory: TrajectoryPoint[];
   /** Sun direction from Earth (ecliptic cartesian, unit vector) */
   sunDir: Vec3;
@@ -46,16 +50,25 @@ export interface SceneData {
   moonDir: Vec3;
   /** Moon distance (km) */
   moonDistKm: number;
+  /** Sun's direction of galactic travel (ecliptic cartesian, unit vector) */
+  solarGalacticDir: Vec3;
+  /** Sun's galactic speed (km/s) */
+  solarGalacticSpeedKmS: number;
 }
 
 const AU_DAY_TO_KM_S = AU_KM / 86400.0;
 
 // Sun's velocity through the galaxy (~230 km/s toward galactic rotation direction)
 // Direction: galactic (l=90°, b=0°) → equatorial RA≈318°, Dec≈+48° → ecliptic cartesian
-// Speed: 230 km/s = 230 * 86400 / 149597870.7 ≈ 0.0001329 AU/day
-const SOLAR_GALACTIC_SPEED_AU_DAY = 230 * 86400 / AU_KM;
+const SOLAR_GALACTIC_SPEED_KMS = 230;
+const SOLAR_GALACTIC_SPEED_AU_DAY = SOLAR_GALACTIC_SPEED_KMS * 86400 / AU_KM;
 const SOLAR_GALACTIC_DIR: Vec3 = vec3Normalize([0.497, -0.115, 0.860]);
 const SOLAR_VEL_AU_DAY: Vec3 = vec3Scale(SOLAR_GALACTIC_DIR, SOLAR_GALACTIC_SPEED_AU_DAY);
+
+// Visualization compression: real galactic drift is 46 AU/year vs 1 AU orbital radius.
+// At true scale the helix looks like a straight line. Compress galactic drift 8× so
+// the corkscrew shape is clearly visible (pitch:radius ≈ 5.75:1 instead of 46:1).
+const GALACTIC_VIS_COMPRESSION = 8;
 
 export function computeSceneData(
   date: Date,
@@ -74,7 +87,12 @@ export function computeSceneData(
     earth.dL, earth.dB, earth.dR,
   );
 
-  // True velocity = orbital velocity + Sun's galactic velocity
+  // Orbital velocity (heliocentric)
+  const orbitalVelKmS = vec3Scale(earthVel, AU_DAY_TO_KM_S);
+  const orbitalSpeedKmS = vec3Length(orbitalVelKmS);
+  const orbitalVelocityDir = vec3Normalize(earthVel);
+
+  // True velocity = orbital + Sun's galactic motion
   const totalVel = vec3Add(earthVel, SOLAR_VEL_AU_DAY);
   const velKmS = vec3Scale(totalVel, AU_DAY_TO_KM_S);
   const speedKmS = vec3Length(velKmS);
@@ -96,9 +114,9 @@ export function computeSceneData(
     const tJD = jd + dayOff;
     const e = earthHelioEcliptic(tJD);
     const pos = eclipticSphericalToCartesian(e.L, e.B, e.R);
-    // Heliocentric offset + Sun's galactic drift over this time interval
     const helioOffset = vec3Sub(pos, earthPos);
-    const galacticDrift = vec3Scale(SOLAR_VEL_AU_DAY, dayOff);
+    // Compressed galactic drift so the helix shape is visible
+    const galacticDrift = vec3Scale(SOLAR_VEL_AU_DAY, dayOff / GALACTIC_VIS_COMPRESSION);
     trajectory.push({
       pos: vec3Add(helioOffset, galacticDrift),
       dayOffset: dayOff,
@@ -116,7 +134,11 @@ export function computeSceneData(
   const moonDistKm = moon.distance;
 
   return {
-    velocityDir, speedKmS, axisDir, rotationAngle, obliquity: eps,
+    velocityDir, speedKmS,
+    orbitalVelocityDir, orbitalSpeedKmS,
+    axisDir, rotationAngle, obliquity: eps,
     trajectory, sunDir, sunDistAU, moonDir, moonDistKm,
+    solarGalacticDir: SOLAR_GALACTIC_DIR,
+    solarGalacticSpeedKmS: SOLAR_GALACTIC_SPEED_KMS,
   };
 }

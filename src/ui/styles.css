@@ -201,6 +201,17 @@ canvas {
   pointer-events: none;
 }
 
+/* Scale note */
+.cm-scale-note {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.12);
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
 /* ── Splash screen ── */
 .cm-splash {
   position: fixed;

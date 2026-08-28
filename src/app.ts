@@ -55,6 +55,8 @@ export class CosmicMotionApp {
   private arrowHelper!: THREE.ArrowHelper;
   private sunLabel!: THREE.Sprite;
   private sunBeam!: THREE.Line;
+  private sunGalacticArrow!: THREE.Group;
+  private orbitalRing!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
 
@@ -81,7 +83,7 @@ export class CosmicMotionApp {
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(
-      55, container.clientWidth / container.clientHeight, 0.01, 2000,
+      55, container.clientWidth / container.clientHeight, 0.01, 5000,
     );
 
     this.scene = new THREE.Scene();
@@ -96,6 +98,8 @@ export class CosmicMotionApp {
     this.buildAxisLine();
     this.buildPoleSweeps();
     this.buildArrow();
+    this.buildSunGalacticArrow();
+    this.buildOrbitalRing();
 
     this.buildGhost();
 
@@ -488,6 +492,61 @@ export class CosmicMotionApp {
     this.scene.add(this.arrowHelper);
   }
 
+  private buildSunGalacticArrow(): void {
+    this.sunGalacticArrow = new THREE.Group();
+
+    // Long faint line showing the Sun's path through the galaxy
+    const lineLen = 120;
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, -lineLen * 0.4),
+      new THREE.Vector3(0, 0, lineLen * 0.6),
+    ]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+      color: 0xffa726, transparent: true, opacity: 0.2,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.sunGalacticArrow.add(line);
+
+    // Arrowhead cone
+    const coneGeo = new THREE.ConeGeometry(0.6, 2.0, 8);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: 0xffa726, transparent: true, opacity: 0.35,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.z = lineLen * 0.6;
+    cone.rotation.x = Math.PI / 2;
+    this.sunGalacticArrow.add(cone);
+
+    // Label at the tip
+    const label = this.makeLabelSprite('GALACTIC', '#ffa726');
+    label.scale.set(3, 0.8, 1);
+    label.position.z = lineLen * 0.6 + 3;
+    label.position.y = 1.5;
+    this.sunGalacticArrow.add(label);
+
+    this.scene.add(this.sunGalacticArrow);
+  }
+
+  private buildOrbitalRing(): void {
+    const segments = 128;
+    const pts: THREE.Vector3[] = [];
+    // Draw at SUN_DIST scale — shows Earth's orbit as a ring around the Sun
+    const orbitRadius = SUN_DIST;
+    for (let i = 0; i <= segments; i++) {
+      const a = (i / segments) * Math.PI * 2;
+      pts.push(new THREE.Vector3(
+        orbitRadius * Math.cos(a), 0, orbitRadius * Math.sin(a),
+      ));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    this.orbitalRing = new THREE.Line(geo, new THREE.LineBasicMaterial({
+      color: 0x4fc3f7, transparent: true, opacity: 0.08,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.scene.add(this.orbitalRing);
+  }
+
   private buildGhost(): void {
     this.ghostGroup = new THREE.Group();
     this.ghostGroup.visible = false;
@@ -703,6 +762,16 @@ export class CosmicMotionApp {
 
     const beamArr = new Float32Array([0, 0, 0, sunPos.x, sunPos.y, sunPos.z]);
     this.sunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
+
+    // Sun's galactic travel direction — arrow through the Sun
+    const galDir = eclToThree(this.data.solarGalacticDir).normalize();
+    this.sunGalacticArrow.position.copy(sunPos);
+    this.sunGalacticArrow.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), galDir,
+    );
+
+    // Orbital ring — centered on the Sun, in the ecliptic plane
+    this.orbitalRing.position.copy(sunPos);
 
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
