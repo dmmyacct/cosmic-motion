@@ -69,6 +69,7 @@ export class CosmicMotionApp {
   private ghostOffsetHours = 0;
   private followGhost = false;
   private ghostWorldPos = new THREE.Vector3();
+  private ghostSunWorldPos = new THREE.Vector3();
   private controls!: OrbitControls;
   private needsDataUpdate = true;
   private firstLoad = true;
@@ -877,17 +878,17 @@ export class CosmicMotionApp {
     const primarySunPos = eclToThree(this.data.sunDir).multiplyScalar(SUN_DIST);
     const galDir = eclToThree(this.data.solarGalacticDir).normalize();
     const driftPerDay = this.data.solarGalacticSpeedKmS * 86400 / 149597870.7 / 8 * AU_TO_SCENE;
-    const ghostSunWorldPos = primarySunPos.clone().add(
+    this.ghostSunWorldPos.copy(primarySunPos).add(
       galDir.clone().multiplyScalar(offsetDays * driftPerDay),
     );
-    this.ghostSunSprite.position.copy(ghostSunWorldPos);
-    this.ghostSunGlow.position.copy(ghostSunWorldPos);
-    this.ghostSunLabel.position.copy(ghostSunWorldPos).add(new THREE.Vector3(0, 4, 0));
+    this.ghostSunSprite.position.copy(this.ghostSunWorldPos);
+    this.ghostSunGlow.position.copy(this.ghostSunWorldPos);
+    this.ghostSunLabel.position.copy(this.ghostSunWorldPos).add(new THREE.Vector3(0, 4, 0));
 
     // Ghost sun beam — from ghost Earth toward ghost Sun
     const beamArr = new Float32Array([
       ghostPos.x, ghostPos.y, ghostPos.z,
-      ghostSunWorldPos.x, ghostSunWorldPos.y, ghostSunWorldPos.z,
+      this.ghostSunWorldPos.x, this.ghostSunWorldPos.y, this.ghostSunWorldPos.z,
     ]);
     this.ghostSunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
@@ -1074,9 +1075,14 @@ export class CosmicMotionApp {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
 
-    // Smoothly move orbit target when following ghost
+    // Follow mode: camera sits behind ghost Earth, looking toward ghost Sun
     if (this.followGhost && this.ghostGroup.visible) {
-      this.controls.target.lerp(this.ghostWorldPos, 0.06);
+      // Place camera behind ghost Earth (opposite side from ghost Sun), slightly above
+      const toSun = this.ghostSunWorldPos.clone().sub(this.ghostWorldPos).normalize();
+      const behindEarth = this.ghostWorldPos.clone().add(toSun.multiplyScalar(-12));
+      behindEarth.y = this.ghostWorldPos.y + 4;
+      this.camera.position.lerp(behindEarth, 0.04);
+      this.controls.target.lerp(this.ghostSunWorldPos, 0.04);
     } else if (!this.followGhost) {
       this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.06);
     }
