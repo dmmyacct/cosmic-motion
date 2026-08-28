@@ -45,6 +45,7 @@ export class CosmicMotionApp {
   private ghostMoon!: THREE.Mesh;
   private ghostAxisLine!: THREE.Line;
   private ghostSweep!: THREE.Group;
+  private ghostSunBeam!: THREE.Line;
   private ghostLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
@@ -657,6 +658,16 @@ export class CosmicMotionApp {
     this.ghostSweep.position.y = axisLen;
     this.ghostGroup.add(this.ghostSweep);
 
+    // Ghost sun beam
+    const ghostBeamGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(), new THREE.Vector3(),
+    ]);
+    this.ghostSunBeam = new THREE.Line(ghostBeamGeo, new THREE.LineBasicMaterial({
+      color: 0xffd54f, transparent: true, opacity: 0.08,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.ghostGroup.add(this.ghostSunBeam);
+
     // Ghost date/time label
     this.ghostLabel = this.makeLabelSprite('', '#ffffff');
     this.ghostLabel.scale.set(2.5, 0.6, 1);
@@ -787,6 +798,14 @@ export class CosmicMotionApp {
     (this.ghostEarth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
     (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
     (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+
+    // Ghost sun beam — from ghost Earth toward the Sun
+    const ghostSunPos = eclToThree(ghostData.sunDir).multiplyScalar(SUN_DIST);
+    const beamArr = new Float32Array([
+      ghostPos.x, ghostPos.y, ghostPos.z,
+      ghostSunPos.x, ghostSunPos.y, ghostSunPos.z,
+    ]);
+    this.ghostSunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
     // Ghost Moon — position relative to ghost Earth
     const ghostMoonPos = eclToThree(ghostData.moonDir).multiplyScalar(MOON_DIST);
