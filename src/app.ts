@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { computeSceneData, type SceneData } from './engine/observer';
 import { LocationService } from './sensors/location';
 import { createUI } from './ui/controls';
@@ -69,11 +70,7 @@ export class CosmicMotionApp {
   private camTarget: 'now' | 'ghost' = 'now';
   private camTargetPos = new THREE.Vector3();
   private ghostWorldPos = new THREE.Vector3();
-  private camTheta = 0;
-  private camPhi = Math.PI * 0.35;
-  private camDist = 12;
-  private dragging = false;
-  private lastPtr = { x: 0, y: 0 };
+  private controls!: OrbitControls;
   private needsDataUpdate = true;
   private firstLoad = true;
 
@@ -133,7 +130,17 @@ export class CosmicMotionApp {
     await this.locationService.request();
     this.locationService.startWatching();
 
-    this.bindControls(container);
+    // OrbitControls — intuitive drag-to-orbit, scroll-to-zoom, touch support, inertia
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.12;
+    this.controls.rotateSpeed = 0.5;
+    this.controls.zoomSpeed = 0.8;
+    this.controls.minDistance = 2;
+    this.controls.maxDistance = 80;
+    this.controls.enablePan = false;
+    this.controls.target.set(0, 0, 0);
+
     window.addEventListener('resize', () => {
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
@@ -762,11 +769,14 @@ export class CosmicMotionApp {
 
     const sunDirNorm = eclToThree(this.data.sunDir).normalize();
 
-    // On first load, point the camera toward the Sun
+    // On first load, place camera so it faces the Sun
     if (this.firstLoad) {
       this.firstLoad = false;
-      this.camTheta = Math.atan2(sunPos.x, sunPos.z);
-      this.camPhi = Math.PI * 0.4;
+      // Camera goes on the opposite side of Earth from the Sun, slightly above
+      const awayFromSun = sunPos.clone().normalize().multiplyScalar(-12);
+      awayFromSun.y = 4;
+      this.camera.position.copy(awayFromSun);
+      this.controls.update();
     }
 
     (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
@@ -1031,61 +1041,6 @@ export class CosmicMotionApp {
     }));
   }
 
-  // ── Controls ──
-
-  private dragVelX = 0;
-  private dragVelY = 0;
-
-  private bindControls(el: HTMLElement): void {
-    el.addEventListener('pointerdown', (e) => {
-      if ((e.target as HTMLElement).closest('.cm-ui')) return;
-      this.dragging = true;
-      this.dragVelX = 0;
-      this.dragVelY = 0;
-      this.lastPtr = { x: e.clientX, y: e.clientY };
-      el.setPointerCapture(e.pointerId);
-    });
-
-    el.addEventListener('pointermove', (e) => {
-      if (!this.dragging) return;
-      const dx = e.clientX - this.lastPtr.x;
-      const dy = e.clientY - this.lastPtr.y;
-      this.lastPtr = { x: e.clientX, y: e.clientY };
-      // Responsive rotation speed scaled to viewport
-      const scale = 0.003;
-      this.dragVelX = dx * scale;
-      this.dragVelY = dy * scale;
-      this.camTheta -= this.dragVelX;
-      this.camPhi = Math.max(0.05, Math.min(Math.PI - 0.05, this.camPhi + this.dragVelY));
-    });
-
-    const stop = () => { this.dragging = false; };
-    el.addEventListener('pointerup', stop);
-    el.addEventListener('pointerleave', stop);
-
-    el.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const zoomSpeed = this.camDist * 0.001;
-      this.camDist = Math.max(2, Math.min(60, this.camDist + e.deltaY * zoomSpeed));
-    }, { passive: false });
-
-    let lastPinch = 0;
-    el.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2) {
-        e.preventDefault();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (lastPinch > 0) {
-          const zoomSpeed = this.camDist * 0.003;
-          this.camDist = Math.max(2, Math.min(60, this.camDist + (lastPinch - dist) * zoomSpeed));
-        }
-        lastPinch = dist;
-      }
-    }, { passive: false });
-    el.addEventListener('touchend', () => { lastPinch = 0; });
-  }
-
   // ── Animation loop ──
 
   private animate = (): void => {
@@ -1120,35 +1075,13 @@ export class CosmicMotionApp {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
 
-    // Inertia — coast after drag release
-    if (!this.dragging) {
-      const decay = 0.92;
-      if (Math.abs(this.dragVelX) > 0.00005 || Math.abs(this.dragVelY) > 0.00005) {
-        this.camTheta -= this.dragVelX;
-        this.camPhi = Math.max(0.05, Math.min(Math.PI - 0.05, this.camPhi + this.dragVelY));
-        this.dragVelX *= decay;
-        this.dragVelY *= decay;
-      }
-    }
-
     // Camera target — smoothly follow NOW or GHOST Earth
     const targetPos = this.camTarget === 'ghost' && this.ghostGroup.visible
       ? this.ghostWorldPos : new THREE.Vector3(0, 0, 0);
     this.camTargetPos.lerp(targetPos, 0.08);
+    this.controls.target.copy(this.camTargetPos);
 
-    // Spherical camera orbit: theta = horizontal angle, phi = vertical (0=top, PI=bottom)
-    const d = this.camDist;
-    const sinPhi = Math.sin(this.camPhi);
-    const cosPhi = Math.cos(this.camPhi);
-    const camOffset = new THREE.Vector3(
-      d * sinPhi * Math.sin(this.camTheta),
-      d * cosPhi,
-      d * sinPhi * Math.cos(this.camTheta),
-    );
-
-    this.camera.position.copy(this.camTargetPos).add(camOffset);
-    this.camera.lookAt(this.camTargetPos);
-
+    this.controls.update();
     this.renderer.render(this.scene, this.camera);
   };
 }
