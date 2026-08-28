@@ -38,22 +38,25 @@ export class CosmicMotionApp {
   private northSweep!: THREE.Group;
   private trajectoryMesh!: THREE.Mesh;
   private trajectoryForwardMesh!: THREE.Mesh;
-  private shadowGroup!: THREE.Group;
+  private ghostGroup!: THREE.Group;
+  private ghostEarth!: THREE.Mesh;
+  private ghostClouds!: THREE.Mesh;
+  private ghostAtmo!: THREE.Mesh;
+  private ghostMoon!: THREE.Mesh;
+  private ghostLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
   private sunGlow!: THREE.Sprite;
   private moonMesh!: THREE.Mesh;
   private starfield!: THREE.Points;
   private arrowHelper!: THREE.ArrowHelper;
-  private nowLabel!: THREE.Sprite;
   private sunLabel!: THREE.Sprite;
-  private moonLabel!: THREE.Sprite;
   private sunBeam!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
 
   private data!: SceneData;
-  private highlightDay = 0;       // slider-selected day offset
+  private ghostOffsetHours = 0;
   private camAzimuth = 0.4;
   private camElevation = 0.45;
   private camDist = 12;
@@ -61,7 +64,6 @@ export class CosmicMotionApp {
   private lastPtr = { x: 0, y: 0 };
   private forwardDir = new THREE.Vector3(0, 0, -1);
   private needsDataUpdate = true;
-  private highlightMesh!: THREE.Mesh;
 
   async init(container: HTMLElement): Promise<void> {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -89,18 +91,12 @@ export class CosmicMotionApp {
     this.buildPoleSweeps();
     this.buildArrow();
 
-    this.shadowGroup = new THREE.Group();
-    this.scene.add(this.shadowGroup);
-
-    // Minimal labels — only Sun gets a small tag, Earth speaks for itself
-    this.nowLabel = this.makeLabelSprite('', '#ffffff');
-    this.nowLabel.visible = false;
+    this.buildGhost();
 
     this.sunLabel = this.makeLabelSprite('☉', '#ffd54f');
     this.sunLabel.scale.set(1.4, 0.7, 1);
     this.scene.add(this.sunLabel);
 
-    // Sun direction beam
     const beamGeo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(0, 0, 0),
@@ -111,22 +107,10 @@ export class CosmicMotionApp {
     }));
     this.scene.add(this.sunBeam);
 
-    this.moonLabel = this.makeLabelSprite('', '#b0b0b0');
-    this.moonLabel.visible = false;
-
-    // Highlight marker (for slider-selected shadow Earth)
-    const hlGeo = new THREE.RingGeometry(EARTH_R * 0.5, EARTH_R * 0.7, 32);
-    const hlMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0,
-      side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    this.highlightMesh = new THREE.Mesh(hlGeo, hlMat);
-    this.scene.add(this.highlightMesh);
-
     this.ui = createUI(container, {
-      onTimeChange: (days) => {
-        this.highlightDay = days;
-        this.updateHighlight();
+      onTimeChange: (hours) => {
+        this.ghostOffsetHours = hours;
+        this.updateGhost();
       },
     });
 
@@ -495,6 +479,166 @@ export class CosmicMotionApp {
     this.scene.add(this.arrowHelper);
   }
 
+  private buildGhost(): void {
+    this.ghostGroup = new THREE.Group();
+    this.ghostGroup.visible = false;
+
+    const loader = new THREE.TextureLoader();
+    const dayTex = loader.load('/textures/earth-day.jpg');
+    const nightTex = loader.load('/textures/earth-night.jpg');
+    const cloudTex = loader.load('/textures/earth-clouds.jpg');
+    dayTex.colorSpace = THREE.SRGBColorSpace;
+
+    // Ghost Earth — same shader as main but semi-transparent
+    const geo = new THREE.SphereGeometry(EARTH_R, 48, 48);
+    const ghostEarthMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        dayMap: { value: dayTex },
+        nightMap: { value: nightTex },
+        ghostAlpha: { value: 0.6 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPos;
+        void main() {
+          vUv = uv;
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        uniform sampler2D dayMap;
+        uniform sampler2D nightMap;
+        uniform float ghostAlpha;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPos;
+        void main() {
+          vec3 sunDir = normalize(sunDirection);
+          float NdotL = dot(vWorldNormal, sunDir);
+          float dayFactor = smoothstep(-0.12, 0.2, NdotL);
+          vec3 dayColor = texture2D(dayMap, vUv).rgb * (0.12 + 0.88 * max(0.0, NdotL));
+          vec3 nightColor = texture2D(nightMap, vUv).rgb * 1.4;
+          vec3 color = mix(nightColor, dayColor, dayFactor);
+          gl_FragColor = vec4(color, ghostAlpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.ghostEarth = new THREE.Mesh(geo, ghostEarthMat);
+    this.ghostGroup.add(this.ghostEarth);
+
+    // Ghost clouds
+    const cloudGeo = new THREE.SphereGeometry(EARTH_R * 1.015, 48, 48);
+    const ghostCloudMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        cloudMap: { value: cloudTex },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        void main() {
+          vUv = uv;
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        uniform sampler2D cloudMap;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        void main() {
+          float NdotL = dot(vWorldNormal, normalize(sunDirection));
+          float light = smoothstep(-0.1, 0.3, NdotL) * (0.6 + 0.4 * max(0.0, NdotL));
+          float cloud = texture2D(cloudMap, vUv).r;
+          gl_FragColor = vec4(vec3(light), cloud * 0.3);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.ghostClouds = new THREE.Mesh(cloudGeo, ghostCloudMat);
+    this.ghostGroup.add(this.ghostClouds);
+
+    // Ghost atmosphere rim
+    const atmoGeo = new THREE.SphereGeometry(EARTH_R * 1.06, 48, 48);
+    const ghostAtmoMat = new THREE.ShaderMaterial({
+      uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        varying vec3 vWorldNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vViewDir = normalize(-mvPos.xyz);
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        varying vec3 vWorldNormal;
+        void main() {
+          float fresnel = pow(1.0 - dot(vViewDir, vNormal), 3.0);
+          float sunBoost = smoothstep(-0.3, 0.5, dot(vWorldNormal, normalize(sunDirection)));
+          float alpha = fresnel * (0.15 + 0.35 * sunBoost);
+          vec3 color = mix(vec3(0.2, 0.4, 0.9), vec3(0.4, 0.7, 1.0), sunBoost);
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    this.ghostAtmo = new THREE.Mesh(atmoGeo, ghostAtmoMat);
+    this.ghostGroup.add(this.ghostAtmo);
+
+    // Ghost Moon
+    const moonGeo = new THREE.SphereGeometry(EARTH_R * 0.27, 24, 24);
+    const ghostMoonMat = new THREE.ShaderMaterial({
+      uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+      vertexShader: `
+        varying vec3 vWorldNormal;
+        void main() {
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        varying vec3 vWorldNormal;
+        void main() {
+          float NdotL = dot(vWorldNormal, normalize(sunDirection));
+          float lit = 0.02 + 0.98 * max(0.0, NdotL);
+          vec3 color = vec3(0.72, 0.71, 0.68) * lit;
+          gl_FragColor = vec4(color, 0.6);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.ghostMoon = new THREE.Mesh(moonGeo, ghostMoonMat);
+    this.ghostGroup.add(this.ghostMoon);
+
+    // Ghost date/time label
+    this.ghostLabel = this.makeLabelSprite('', '#ffffff');
+    this.ghostLabel.scale.set(2.5, 0.6, 1);
+    this.ghostGroup.add(this.ghostLabel);
+
+    this.scene.add(this.ghostGroup);
+  }
+
   // ── Update scene from engine data ──
 
   private updateSceneData(): void {
@@ -504,83 +648,28 @@ export class CosmicMotionApp {
 
     this.forwardDir = eclToThree(this.data.velocityDir).normalize();
 
-    // Build trajectory as tube meshes (past = purple, future = cyan)
     this.buildTrajectoryMeshes();
-
-    // Arrow showing Earth's velocity direction
     this.arrowHelper.setDirection(this.forwardDir);
 
-    // Shadow Earths at integer-day offsets
-    this.shadowGroup.clear();
-    const pts = this.data.trajectory;
-    for (let d = -10; d <= 10; d++) {
-      if (d === 0) continue;
-      const pt = pts.find((p) => Math.abs(p.dayOffset - d) < 0.01);
-      if (!pt) continue;
-
-      const pos = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
-      const isFuture = d > 0;
-      const absD = Math.abs(d);
-
-      const r = EARTH_R * (absD <= 3 ? 0.3 : 0.2);
-      const geo = new THREE.SphereGeometry(r, 16, 16);
-      const color = isFuture ? 0x00e5ff : 0x9c6dff;
-      const mat = new THREE.MeshBasicMaterial({
-        color, transparent: true,
-        opacity: Math.max(0.05, 0.35 - absD * 0.03),
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(pos);
-      this.shadowGroup.add(mesh);
-
-      // Subtle glow ring
-      const ringGeo = new THREE.RingGeometry(r * 1.2, r * 1.4, 24);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: Math.max(0.01, 0.06 - absD * 0.005),
-        side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.copy(pos);
-      ring.lookAt(this.camera.position);
-      this.shadowGroup.add(ring);
-
-      if (absD % 5 === 0) {
-        const label = this.makeLabelSprite(
-          d > 0 ? `+${d}d` : `${d}d`,
-          isFuture ? '#00e5ff' : '#b388ff',
-        );
-        label.position.copy(pos).add(new THREE.Vector3(0, r + 0.3, 0));
-        label.scale.set(1.0, 0.5, 1);
-        this.shadowGroup.add(label);
-      }
-    }
-
-    // Sun (correct direction, compressed distance)
+    // Sun
     const sunPos = eclToThree(this.data.sunDir).multiplyScalar(SUN_DIST);
     this.sunLight.position.copy(sunPos);
     this.sunSprite.position.copy(sunPos);
     this.sunGlow.position.copy(sunPos);
     this.sunLabel.position.copy(sunPos).add(new THREE.Vector3(0, 5, 0));
 
-    // Update sun direction on all Earth shaders
     const sunDirNorm = eclToThree(this.data.sunDir).normalize();
     (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.clouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.moonMesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
 
-    // Sun beam from Earth toward Sun
-    const beamArr = new Float32Array([
-      0, 0, 0,
-      sunPos.x, sunPos.y, sunPos.z,
-    ]);
+    const beamArr = new Float32Array([0, 0, 0, sunPos.x, sunPos.y, sunPos.z]);
     this.sunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
-    this.moonLabel.position.copy(moonPos).add(new THREE.Vector3(0, EARTH_R * 0.27 + 0.35, 0));
 
     // Earth tilt
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
@@ -591,29 +680,107 @@ export class CosmicMotionApp {
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
 
-    this.ui.update({
-      speedKmS: this.data.speedKmS,
-      date: new Date(),
-    });
-    this.updateHighlight();
+    this.ui.update({ speedKmS: this.data.speedKmS, date: new Date() });
+    this.updateGhost();
   }
 
-  private updateHighlight(): void {
+  private updateGhost(): void {
     if (!this.data) return;
-    const day = Math.round(this.highlightDay);
-    if (day === 0 || Math.abs(this.highlightDay) < 0.3) {
-      (this.highlightMesh.material as THREE.MeshBasicMaterial).opacity = 0;
+
+    if (Math.abs(this.ghostOffsetHours) < 0.01) {
+      this.ghostGroup.visible = false;
       return;
     }
-    const pt = this.data.trajectory.find((p) => Math.abs(p.dayOffset - day) < 0.01);
-    if (!pt) {
-      (this.highlightMesh.material as THREE.MeshBasicMaterial).opacity = 0;
-      return;
+
+    this.ghostGroup.visible = true;
+
+    const ghostDate = new Date(Date.now() + this.ghostOffsetHours * 3600_000);
+    const ghostData = computeSceneData(ghostDate, 0, 1);
+    const offsetDays = this.ghostOffsetHours / 24;
+    // Find the ghost Earth's position relative to NOW Earth using the trajectory
+    // For positions within our trajectory range, interpolate; otherwise compute fresh
+    let ghostPos: THREE.Vector3;
+    if (Math.abs(offsetDays) <= 10) {
+      const pts = this.data.trajectory;
+      // Find two bracketing points and interpolate
+      let lower = pts[0], upper = pts[pts.length - 1];
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (pts[i].dayOffset <= offsetDays && pts[i + 1].dayOffset >= offsetDays) {
+          lower = pts[i];
+          upper = pts[i + 1];
+          break;
+        }
+      }
+      const range = upper.dayOffset - lower.dayOffset;
+      const t = range > 0 ? (offsetDays - lower.dayOffset) / range : 0;
+      ghostPos = new THREE.Vector3(
+        lower.pos[0] + t * (upper.pos[0] - lower.pos[0]),
+        lower.pos[1] + t * (upper.pos[1] - lower.pos[1]),
+        lower.pos[2] + t * (upper.pos[2] - lower.pos[2]),
+      );
+      ghostPos = eclToThree([ghostPos.x, ghostPos.y, ghostPos.z]).multiplyScalar(AU_TO_SCENE);
+    } else {
+      // Beyond ±10 day trajectory — use ghost's own trajectory center offset
+      // Compute with a wider range to get the position difference
+      const wideData = computeSceneData(new Date(), Math.ceil(Math.abs(offsetDays)) + 1, 1);
+      const closest = wideData.trajectory.reduce((best, pt) =>
+        Math.abs(pt.dayOffset - offsetDays) < Math.abs(best.dayOffset - offsetDays) ? pt : best
+      );
+      ghostPos = eclToThree(closest.pos).multiplyScalar(AU_TO_SCENE);
     }
-    const pos = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
-    this.highlightMesh.position.copy(pos);
-    this.highlightMesh.lookAt(this.camera.position);
-    (this.highlightMesh.material as THREE.MeshBasicMaterial).opacity = 0.4;
+
+    // Position the ghost group
+    this.ghostEarth.position.copy(ghostPos);
+    this.ghostClouds.position.copy(ghostPos);
+    this.ghostAtmo.position.copy(ghostPos);
+
+    // Ghost Earth rotation (GMST at ghost time)
+    const tiltAxis = eclToThree([1, 0, 0]).normalize();
+    const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, ghostData.obliquity);
+    const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), ghostData.rotationAngle,
+    );
+    const ghostQ = tiltQuat.clone().multiply(spinQuat);
+    this.ghostEarth.quaternion.copy(ghostQ);
+    this.ghostClouds.quaternion.copy(ghostQ);
+    this.ghostAtmo.quaternion.copy(tiltQuat);
+
+    // Ghost Sun direction
+    const ghostSunDir = eclToThree(ghostData.sunDir).normalize();
+    (this.ghostEarth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+    (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+    (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+
+    // Ghost Moon — position relative to ghost Earth
+    const ghostMoonPos = eclToThree(ghostData.moonDir).multiplyScalar(MOON_DIST);
+    this.ghostMoon.position.copy(ghostPos).add(ghostMoonPos);
+    (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+
+    // Ghost label
+    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R + 0.6, 0));
+    // Update label texture with ghost date
+    this.updateGhostLabel(ghostDate);
+  }
+
+  private updateGhostLabel(date: Date): void {
+    const text = date.toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 24px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    (this.ghostLabel.material as THREE.SpriteMaterial).map?.dispose();
+    (this.ghostLabel.material as THREE.SpriteMaterial).map = tex;
+    (this.ghostLabel.material as THREE.SpriteMaterial).needsUpdate = true;
   }
 
   private buildTrajectoryMeshes(): void {
@@ -745,6 +912,8 @@ export class CosmicMotionApp {
     requestAnimationFrame(this.animate);
 
     if (this.needsDataUpdate) this.updateSceneData();
+
+    this.ui.tickPlayback();
 
     // Earth spin animation
     const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
