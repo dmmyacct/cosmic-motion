@@ -68,6 +68,7 @@ export class CosmicMotionApp {
   private data!: SceneData;
   private ghostOffsetHours = 0;
   private followGhost = false;
+  private followTransition = 0;
   private ghostWorldPos = new THREE.Vector3();
   private ghostSunWorldPos = new THREE.Vector3();
   private controls!: OrbitControls;
@@ -124,6 +125,7 @@ export class CosmicMotionApp {
       },
       onToggleFollow: () => {
         this.followGhost = !this.followGhost;
+        if (this.followGhost) this.followTransition = 1.0;
       },
     });
 
@@ -1075,14 +1077,19 @@ export class CosmicMotionApp {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
 
-    // Follow mode: camera sits behind ghost Earth, looking toward ghost Sun
     if (this.followGhost && this.ghostGroup.visible) {
-      // Place camera behind ghost Earth (opposite side from ghost Sun), slightly above
-      const toSun = this.ghostSunWorldPos.clone().sub(this.ghostWorldPos).normalize();
-      const behindEarth = this.ghostWorldPos.clone().add(toSun.multiplyScalar(-12));
-      behindEarth.y = this.ghostWorldPos.y + 4;
-      this.camera.position.lerp(behindEarth, 0.04);
-      this.controls.target.lerp(this.ghostSunWorldPos, 0.04);
+      // Keep orbit center on ghost Sun so you're always looking at it
+      this.controls.target.lerp(this.ghostSunWorldPos, 0.08);
+
+      // Initial transition: smoothly move camera behind ghost Earth
+      if (this.followTransition > 0) {
+        const toSun = this.ghostSunWorldPos.clone().sub(this.ghostWorldPos).normalize();
+        const behindEarth = this.ghostWorldPos.clone().add(toSun.multiplyScalar(-12));
+        behindEarth.y = this.ghostWorldPos.y + 4;
+        const t = Math.min(0.06, this.followTransition);
+        this.camera.position.lerp(behindEarth, t);
+        this.followTransition -= 0.01;
+      }
     } else if (!this.followGhost) {
       this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.06);
     }
