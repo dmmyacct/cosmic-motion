@@ -105,7 +105,7 @@ export class CosmicMotionApp {
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(
-      55, container.clientWidth / container.clientHeight, 0.01, 5000,
+      55, container.clientWidth / container.clientHeight, 0.1, 500000,
     );
 
     this.scene = new THREE.Scene();
@@ -177,7 +177,7 @@ export class CosmicMotionApp {
     this.controls.rotateSpeed = 0.5;
     this.controls.zoomSpeed = 0.8;
     this.controls.minDistance = 2;
-    this.controls.maxDistance = 200;
+    this.controls.maxDistance = 100000;
     this.controls.enablePan = false;
     this.controls.target.set(0, 0, 0);
 
@@ -197,7 +197,7 @@ export class CosmicMotionApp {
   // ── Build objects ──
 
   private buildStarfield(): void {
-    const R = 600;
+    const R = 2000;
     const eps = 23.4393 * Math.PI / 180; // J2000 obliquity for coordinate conversion
     const cosE = Math.cos(eps), sinE = Math.sin(eps);
 
@@ -300,7 +300,7 @@ export class CosmicMotionApp {
         void main() {
           vColor = color;
           vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (300.0 / -mvPos.z);
+          gl_PointSize = size * (600.0 / -mvPos.z);
           gl_Position = projectionMatrix * mvPos;
         }
       `,
@@ -1480,9 +1480,9 @@ export class CosmicMotionApp {
 
     const sunPastPts: THREE.Vector3[] = [];
     const sunFuturePts: THREE.Vector3[] = [];
-    // Extend Sun line well beyond the trajectory range for visual depth
-    const sunExtend = daysRange * 1.5;
-    const sunSteps = 200;
+    // Extend Sun line beyond the trajectory range for visual depth
+    const sunExtend = daysRange * 1.3;
+    const sunSteps = 300;
     for (let i = -sunSteps; i <= sunSteps; i++) {
       const dayOff = (i / sunSteps) * sunExtend;
       const drift = galDir.clone().multiplyScalar(dayOff * driftPerDay);
