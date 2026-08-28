@@ -43,6 +43,8 @@ export class CosmicMotionApp {
   private ghostClouds!: THREE.Mesh;
   private ghostAtmo!: THREE.Mesh;
   private ghostMoon!: THREE.Mesh;
+  private ghostAxisLine!: THREE.Line;
+  private ghostSweep!: THREE.Group;
   private ghostLabel!: THREE.Sprite;
   private sunLight!: THREE.PointLight;
   private sunSprite!: THREE.Sprite;
@@ -631,6 +633,24 @@ export class CosmicMotionApp {
     this.ghostMoon = new THREE.Mesh(moonGeo, ghostMoonMat);
     this.ghostGroup.add(this.ghostMoon);
 
+    // Ghost axis tilt line
+    const axisLen = EARTH_R * 2.5;
+    const axisGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, -axisLen, 0),
+      new THREE.Vector3(0, axisLen, 0),
+    ]);
+    this.ghostAxisLine = new THREE.Line(axisGeo, new THREE.LineDashedMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.1,
+      dashSize: 0.12, gapSize: 0.06,
+    }));
+    this.ghostAxisLine.computeLineDistances();
+    this.ghostGroup.add(this.ghostAxisLine);
+
+    // Ghost pole sweep
+    this.ghostSweep = this.createSweepArc(0.35, 0.5);
+    this.ghostSweep.position.y = axisLen;
+    this.ghostGroup.add(this.ghostSweep);
+
     // Ghost date/time label
     this.ghostLabel = this.makeLabelSprite('', '#ffffff');
     this.ghostLabel.scale.set(2.5, 0.6, 1);
@@ -745,6 +765,16 @@ export class CosmicMotionApp {
     this.ghostClouds.quaternion.copy(ghostQ);
     this.ghostAtmo.quaternion.copy(tiltQuat);
 
+    // Ghost axis line + pole sweep — positioned at ghost, tilted
+    this.ghostAxisLine.position.copy(ghostPos);
+    this.ghostAxisLine.quaternion.copy(tiltQuat);
+
+    const sweepParentPos = ghostPos.clone();
+    const axisLen = EARTH_R * 2.5;
+    const axisUp = new THREE.Vector3(0, axisLen, 0).applyQuaternion(tiltQuat);
+    this.ghostSweep.position.copy(sweepParentPos.clone().add(axisUp));
+    this.ghostSweep.quaternion.copy(tiltQuat);
+
     // Ghost Sun direction
     const ghostSunDir = eclToThree(ghostData.sunDir).normalize();
     (this.ghostEarth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
@@ -757,7 +787,7 @@ export class CosmicMotionApp {
     (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
 
     // Ghost label
-    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R + 0.6, 0));
+    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R * 2.5 + 0.5, 0));
     // Update label texture with ghost date
     this.updateGhostLabel(ghostDate);
   }
@@ -934,6 +964,11 @@ export class CosmicMotionApp {
 
     // Pole sweep chases around the north pole to show spin direction
     this.northSweep.rotation.y = performance.now() * 0.0018;
+
+    // Ghost sweep spins too
+    if (this.ghostGroup.visible) {
+      this.ghostSweep.rotation.y = performance.now() * 0.0018;
+    }
 
     // Camera orbit: "behind Earth looking forward along trajectory"
     const fwd = this.forwardDir;
