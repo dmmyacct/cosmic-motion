@@ -11,6 +11,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { computeSceneData, type SceneData } from './engine/observer';
+import { moonPosition } from './engine/lunar';
+import { raDecToCartesian, equatorialToEcliptic, obliquity } from './engine/coordinates';
+import { dateToJD } from './engine/time';
 import { LocationService } from './sensors/location';
 import { createUI } from './ui/controls';
 
@@ -61,6 +64,7 @@ export class CosmicMotionApp {
   private sunBeam!: THREE.Line;
   private sunDistLabel!: THREE.Sprite;
   private moonDistLabel!: THREE.Sprite;
+  private moonOrbitLine!: THREE.Line;
   private orbitalRing!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
@@ -410,24 +414,14 @@ export class CosmicMotionApp {
     this.moonMesh = new THREE.Mesh(geo, moonMat);
     this.scene.add(this.moonMesh);
 
-    // Moon orbital path (simplified circle at MOON_DIST)
-    const orbitSegments = 96;
-    const orbitPts: THREE.Vector3[] = [];
-    for (let i = 0; i <= orbitSegments; i++) {
-      const a = (i / orbitSegments) * Math.PI * 2;
-      orbitPts.push(new THREE.Vector3(
-        MOON_DIST * Math.cos(a),
-        0,
-        MOON_DIST * Math.sin(a),
-      ));
-    }
-    const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPts);
-    const orbitLine = new THREE.Line(orbitGeo, new THREE.LineBasicMaterial({
-      color: 0x888888, transparent: true, opacity: 0.08, depthWrite: false,
-    }));
-    // Tilt Moon's orbit by ~5.14° (inclination to ecliptic)
-    orbitLine.rotation.x = 5.14 * Math.PI / 180;
-    this.scene.add(orbitLine);
+    // Moon orbital path — computed from actual lunar ephemeris over one sidereal month
+    this.moonOrbitLine = new THREE.Line(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({
+        color: 0x999999, transparent: true, opacity: 0.1, depthWrite: false,
+      }),
+    );
+    this.scene.add(this.moonOrbitLine);
   }
 
   private buildPoleSweeps(): void {
@@ -534,6 +528,24 @@ export class CosmicMotionApp {
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     this.scene.add(this.orbitalRing);
+  }
+
+  private rebuildMoonOrbit(date: Date): void {
+    const SIDEREAL_MONTH_DAYS = 27.3217;
+    const steps = 120;
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const dayOff = (i / steps) * SIDEREAL_MONTH_DAYS;
+      const stepDate = new Date(date.getTime() + dayOff * 86400_000);
+      const jd = dateToJD(stepDate);
+      const eps = obliquity(jd);
+      const moon = moonPosition(jd);
+      const moonEq = raDecToCartesian(moon.ra, moon.dec);
+      const moonEcl = equatorialToEcliptic(moonEq, eps);
+      pts.push(eclToThree(moonEcl).multiplyScalar(MOON_DIST));
+    }
+    this.moonOrbitLine.geometry.dispose();
+    this.moonOrbitLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
   }
 
   private buildGhost(): void {
@@ -773,6 +785,7 @@ export class CosmicMotionApp {
     const velocityDir = eclToThree(this.data.velocityDir).normalize();
 
     this.buildTrajectoryMeshes();
+    this.rebuildMoonOrbit(date);
     this.arrowHelper.setDirection(velocityDir);
 
     // Sun
