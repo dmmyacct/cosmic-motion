@@ -69,6 +69,11 @@ export class CosmicMotionApp {
   private moonDistLabel!: THREE.Sprite;
   private moonOrbitLine!: THREE.Line;
   private orbitalRing!: THREE.Line;
+  private locMarker!: THREE.Group;
+  private locDot!: THREE.Mesh;
+  private locLine!: THREE.Line;
+  private locCard!: THREE.Sprite;
+  private locVisible = true;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
   private sunTrajectoryPast!: THREE.Mesh;
@@ -110,6 +115,7 @@ export class CosmicMotionApp {
     this.buildPoleSweeps();
     this.buildArrow();
     this.buildOrbitalRing();
+    this.buildLocationMarker();
 
     this.buildGhost();
 
@@ -143,6 +149,9 @@ export class CosmicMotionApp {
       onToggleFollow: () => {
         this.followGhost = !this.followGhost;
         if (this.followGhost) this.followTransition = 1.0;
+      },
+      onToggleLocation: () => {
+        this.locVisible = !this.locVisible;
       },
     });
 
@@ -479,6 +488,170 @@ export class CosmicMotionApp {
       }),
     );
     this.scene.add(this.moonOrbitLine);
+  }
+
+  private buildLocationMarker(): void {
+    this.locMarker = new THREE.Group();
+
+    // Glowing dot on Earth surface
+    const dotGeo = new THREE.SphereGeometry(0.025, 12, 12);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: 0x00ff88, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    this.locDot = new THREE.Mesh(dotGeo, dotMat);
+    this.locMarker.add(this.locDot);
+
+    // Thin line from surface to card
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(), new THREE.Vector3(0, 1, 0),
+    ]);
+    this.locLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({
+      color: 0x00ff88, transparent: true, opacity: 0.25, depthWrite: false,
+    }));
+    this.locMarker.add(this.locLine);
+
+    // Info card sprite
+    this.locCard = this.makeDistLabel();
+    this.locCard.scale.set(10, 2.5, 1);
+    this.locMarker.add(this.locCard);
+
+    this.scene.add(this.locMarker);
+  }
+
+  private updateLocationMarker(): void {
+    if (!this.data || !this.locMarker) return;
+    this.locMarker.visible = this.locVisible;
+    if (!this.locVisible) return;
+
+    const loc = this.locationService.location;
+    const latRad = loc.latDeg * Math.PI / 180;
+    const lonRad = loc.lonDeg * Math.PI / 180;
+
+    // Position on unit sphere (Three.js coords: Y=up, Z=toward camera)
+    // Standard spherical: lon=0 is +X, lat=0 is equator
+    const cosLat = Math.cos(latRad);
+    const surfacePos = new THREE.Vector3(
+      cosLat * Math.cos(lonRad),
+      Math.sin(latRad),
+      -cosLat * Math.sin(lonRad),
+    ).multiplyScalar(EARTH_R * 1.005);
+
+    // Apply same rotation as Earth: tilt + spin
+    const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
+    const tiltAxis = eclToThree([1, 0, 0]).normalize();
+    const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
+    const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
+    );
+    const earthQuat = tiltQuat.clone().multiply(spinQuat);
+
+    const worldPos = surfacePos.clone().applyQuaternion(earthQuat);
+    this.locDot.position.copy(worldPos);
+
+    // Line extends outward from Earth surface
+    const cardOffset = worldPos.clone().normalize().multiplyScalar(1.2);
+    const cardPos = worldPos.clone().add(cardOffset);
+    const lineArr = new Float32Array([
+      worldPos.x, worldPos.y, worldPos.z,
+      cardPos.x, cardPos.y, cardPos.z,
+    ]);
+    this.locLine.geometry.setAttribute('position', new THREE.BufferAttribute(lineArr, 3));
+
+    this.locCard.position.copy(cardPos);
+
+    // Compute local time at this longitude
+    const now = new Date();
+    const utcH = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+    const localH = ((utcH + loc.lonDeg / 15) % 24 + 24) % 24;
+    const lh = Math.floor(localH);
+    const lm = Math.floor((localH - lh) * 60);
+    const ampm = lh >= 12 ? 'PM' : 'AM';
+    const h12 = lh % 12 || 12;
+    const localTimeStr = `${h12}:${String(lm).padStart(2, '0')} ${ampm}`;
+
+    // Sunset calculation: hour angle when sun altitude = -0.833° (atmospheric refraction)
+    const sunDir3 = eclToThree(this.data.sunDir).normalize();
+    const sunDirEarth = sunDir3.clone().applyQuaternion(earthQuat.clone().invert());
+    const sunDecl = Math.asin(sunDirEarth.y);
+    const cosHA = (Math.sin(-0.01454) - Math.sin(latRad) * Math.sin(sunDecl))
+      / (Math.cos(latRad) * Math.cos(sunDecl));
+
+    let sunsetStr: string;
+    if (cosHA > 1) {
+      sunsetStr = 'No sunset (polar night)';
+    } else if (cosHA < -1) {
+      sunsetStr = 'No sunset (midnight sun)';
+    } else {
+      const haSet = Math.acos(cosHA) * 12 / Math.PI; // hours from solar noon
+      // Solar noon in local solar time = 12:00, convert to local time
+      // Equation of time approximation
+      const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400_000);
+      const B = (360 / 365) * (dayOfYear - 81) * Math.PI / 180;
+      const eqOfTime = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B); // minutes
+      const solarNoonUTC = 12 - loc.lonDeg / 15 - eqOfTime / 60;
+      const sunsetUTC = solarNoonUTC + haSet;
+      const sunsetLocal = ((sunsetUTC + loc.lonDeg / 15) % 24 + 24) % 24;
+
+      // Time until sunset
+      const hoursUntil = ((sunsetLocal - localH) % 24 + 24) % 24;
+      if (hoursUntil < 0.05) {
+        sunsetStr = 'Sunset now';
+      } else if (hoursUntil > 23.5) {
+        sunsetStr = 'Sunset now';
+      } else {
+        const uh = Math.floor(hoursUntil);
+        const um = Math.round((hoursUntil - uh) * 60);
+        sunsetStr = uh > 0 ? `Sunset in ${uh}h ${um}m` : `Sunset in ${um}m`;
+      }
+    }
+
+    const latStr = `${Math.abs(loc.latDeg).toFixed(2)}°${loc.latDeg >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(loc.lonDeg).toFixed(2)}°${loc.lonDeg >= 0 ? 'E' : 'W'}`;
+
+    this.updateLocCard(
+      `${latStr}  ${lonStr}  ·  ${localTimeStr}`,
+      sunsetStr,
+    );
+  }
+
+  private updateLocCard(line1: string, line2: string): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800; canvas.height = 200;
+    const ctx = canvas.getContext('2d')!;
+
+    // Subtle glass background
+    ctx.fillStyle = 'rgba(6, 12, 20, 0.65)';
+    ctx.beginPath();
+    ctx.roundRect(40, 20, 720, 160, 12);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(40, 20, 720, 160, 12);
+    ctx.stroke();
+
+    // Line 1: location + time
+    ctx.font = '500 30px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText(line1, 400, 72);
+
+    // Line 2: sunset
+    ctx.font = '400 24px -apple-system, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(0, 255, 136, 0.7)';
+    ctx.fillText(line2, 400, 128);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = this.locCard.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.map = tex;
+    mat.needsUpdate = true;
   }
 
   private buildPoleSweeps(): void {
@@ -1288,6 +1461,9 @@ export class CosmicMotionApp {
     if (this.ghostGroup.visible) {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
     }
+
+    // Update location marker position every frame (rotates with Earth)
+    this.updateLocationMarker();
 
     if (this.followGhost && this.ghostGroup.visible) {
       // Move orbit center + camera with the ghost Earth so user rides along

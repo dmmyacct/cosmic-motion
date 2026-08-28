@@ -5,6 +5,7 @@
 export interface UICallbacks {
   onTimeChange: (hours: number) => void;
   onToggleFollow: () => void;
+  onToggleLocation: () => void;
 }
 
 export interface UIUpdateData {
@@ -192,6 +193,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-rev-btn" title="Reverse">◀</button>
       <button class="cm-speed-btn" title="Playback speed">1 hr/s</button>
       <button class="cm-follow-btn" title="Follow ghost">Follow</button>
+      <button class="cm-loc-btn active" title="My location">📍</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
   `;
@@ -204,6 +206,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const revBtn = timePanel.querySelector('.cm-rev-btn') as HTMLButtonElement;
   const speedBtn = timePanel.querySelector('.cm-speed-btn') as HTMLButtonElement;
   const followBtn = timePanel.querySelector('.cm-follow-btn') as HTMLButtonElement;
+  const locBtn = timePanel.querySelector('.cm-loc-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
   let currentHoursOffset = 0;
@@ -274,6 +277,11 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     followBtn.textContent = followingGhost ? 'Unfollow' : 'Follow';
     followBtn.classList.toggle('active', followingGhost);
     callbacks.onToggleFollow();
+  });
+
+  locBtn.addEventListener('click', () => {
+    locBtn.classList.toggle('active');
+    callbacks.onToggleLocation();
   });
 
   resetBtn.addEventListener('click', () => {
