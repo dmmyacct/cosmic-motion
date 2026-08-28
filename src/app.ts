@@ -31,6 +31,7 @@ export class CosmicMotionApp {
   private ui!: ReturnType<typeof createUI>;
 
   private earth!: THREE.Mesh;
+  private clouds!: THREE.Mesh;
   private atmosphere!: THREE.Mesh;
   private axisLine!: THREE.Line;
   private poleSweepGroup!: THREE.Group;
@@ -186,46 +187,45 @@ export class CosmicMotionApp {
   }
 
   private buildEarth(): void {
-    const geo = new THREE.SphereGeometry(EARTH_R, 64, 64);
+    const loader = new THREE.TextureLoader();
+    const dayTex = loader.load('/textures/earth-day.jpg');
+    const nightTex = loader.load('/textures/earth-night.jpg');
+    const cloudTex = loader.load('/textures/earth-clouds.jpg');
 
-    // Day/night shader: sunlit side shows ocean/land tones, dark side shows faint city-light emissive
+    dayTex.colorSpace = THREE.SRGBColorSpace;
+
+    // Earth surface: NASA Blue Marble day + city lights night, blended at terminator
+    const geo = new THREE.SphereGeometry(EARTH_R, 64, 64);
     const earthMat = new THREE.ShaderMaterial({
       uniforms: {
         sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        dayMap: { value: dayTex },
+        nightMap: { value: nightTex },
       },
       vertexShader: `
-        varying vec3 vNormal;
-        varying vec3 vWorldPos;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
         void main() {
-          vNormal = normalize(normalMatrix * normal);
-          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+          vUv = uv;
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
         uniform vec3 sunDirection;
-        varying vec3 vNormal;
-        varying vec3 vWorldPos;
+        uniform sampler2D dayMap;
+        uniform sampler2D nightMap;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
         void main() {
           vec3 sunDir = normalize(sunDirection);
-          float NdotL = dot(vNormal, sunDir);
-          // Smooth terminator
-          float dayFactor = smoothstep(-0.15, 0.25, NdotL);
+          float NdotL = dot(vWorldNormal, sunDir);
+          float dayFactor = smoothstep(-0.12, 0.2, NdotL);
 
-          // Day side: rich ocean blue with slight specular
-          vec3 dayColor = mix(
-            vec3(0.04, 0.12, 0.28),   // deep ocean
-            vec3(0.15, 0.45, 0.75),   // sunlit ocean
-            max(0.0, NdotL)
-          );
+          vec3 dayColor = texture2D(dayMap, vUv).rgb;
+          dayColor *= (0.55 + 0.45 * max(0.0, NdotL));
 
-          // Night side: dark with faint warm city lights
-          vec3 nightColor = vec3(0.008, 0.006, 0.015);
-          // Scattered "city" dots based on position hash
-          float hash = fract(sin(dot(vWorldPos.xz * 50.0, vec2(12.9898, 78.233))) * 43758.5453);
-          if (hash > 0.92) {
-            nightColor += vec3(0.12, 0.08, 0.02) * (hash - 0.92) * 12.0;
-          }
+          vec3 nightColor = texture2D(nightMap, vUv).rgb * 1.4;
 
           vec3 color = mix(nightColor, dayColor, dayFactor);
           gl_FragColor = vec4(color, 1.0);
@@ -235,7 +235,41 @@ export class CosmicMotionApp {
     this.earth = new THREE.Mesh(geo, earthMat);
     this.scene.add(this.earth);
 
-    // Fresnel atmosphere rim — glows blue at the edges, transparent face-on
+    // Cloud layer — slightly larger sphere, semi-transparent white clouds
+    const cloudGeo = new THREE.SphereGeometry(EARTH_R * 1.015, 64, 64);
+    const cloudMat = new THREE.ShaderMaterial({
+      uniforms: {
+        sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        cloudMap: { value: cloudTex },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        void main() {
+          vUv = uv;
+          vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 sunDirection;
+        uniform sampler2D cloudMap;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        void main() {
+          float NdotL = dot(vWorldNormal, normalize(sunDirection));
+          float light = smoothstep(-0.1, 0.3, NdotL) * (0.6 + 0.4 * max(0.0, NdotL));
+          float cloud = texture2D(cloudMap, vUv).r;
+          gl_FragColor = vec4(vec3(light), cloud * 0.45);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.clouds = new THREE.Mesh(cloudGeo, cloudMat);
+    this.scene.add(this.clouds);
+
+    // Fresnel atmosphere rim
     const atmoGeo = new THREE.SphereGeometry(EARTH_R * 1.06, 64, 64);
     const atmoMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -261,7 +295,6 @@ export class CosmicMotionApp {
         void main() {
           float fresnel = 1.0 - dot(vViewDir, vNormal);
           fresnel = pow(fresnel, 3.0);
-          // Brighter on sunlit side
           float sunFacing = dot(vWorldNormal, normalize(sunDirection));
           float sunBoost = smoothstep(-0.3, 0.5, sunFacing);
           float alpha = fresnel * (0.25 + 0.55 * sunBoost);
@@ -499,9 +532,10 @@ export class CosmicMotionApp {
     this.sunGlow.position.copy(sunPos);
     this.sunLabel.position.copy(sunPos).add(new THREE.Vector3(0, 5, 0));
 
-    // Update day/night shader sun direction
+    // Update sun direction on all Earth shaders
     const sunDirNorm = eclToThree(this.data.sunDir).normalize();
     (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
+    (this.clouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
 
     // Sun beam from Earth toward Sun
@@ -520,6 +554,7 @@ export class CosmicMotionApp {
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
     const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
     this.earth.quaternion.copy(tiltQuat);
+    this.clouds.quaternion.copy(tiltQuat);
     this.atmosphere.quaternion.copy(tiltQuat);
     this.poleSweepGroup.quaternion.copy(tiltQuat);
     this.axisLine.quaternion.copy(tiltQuat);
@@ -688,6 +723,13 @@ export class CosmicMotionApp {
       this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
     );
     this.earth.quaternion.copy(tiltQuat).multiply(spinQuat);
+
+    // Clouds spin with Earth but drift very slightly slower
+    const cloudSpinQuat = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      this.data.rotationAngle + performance.now() * 0.001 * rotSpeed * 0.97,
+    );
+    this.clouds.quaternion.copy(tiltQuat).multiply(cloudSpinQuat);
 
     // Pole sweep chases around the north pole to show spin direction
     this.northSweep.rotation.y = performance.now() * 0.0018;
