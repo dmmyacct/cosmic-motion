@@ -58,7 +58,6 @@ export class CosmicMotionApp {
   private arrowHelper!: THREE.ArrowHelper;
   private sunLabel!: THREE.Sprite;
   private sunBeam!: THREE.Line;
-  private sunGalacticArrow!: THREE.Group;
   private orbitalRing!: THREE.Line;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
@@ -103,7 +102,6 @@ export class CosmicMotionApp {
     this.buildAxisLine();
     this.buildPoleSweeps();
     this.buildArrow();
-    this.buildSunGalacticArrow();
     this.buildOrbitalRing();
 
     this.buildGhost();
@@ -497,42 +495,6 @@ export class CosmicMotionApp {
     this.scene.add(this.arrowHelper);
   }
 
-  private buildSunGalacticArrow(): void {
-    this.sunGalacticArrow = new THREE.Group();
-
-    // Long faint line showing the Sun's path through the galaxy
-    const lineLen = 120;
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, -lineLen * 0.4),
-      new THREE.Vector3(0, 0, lineLen * 0.6),
-    ]);
-    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-      color: 0xffa726, transparent: true, opacity: 0.2,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    }));
-    this.sunGalacticArrow.add(line);
-
-    // Arrowhead cone
-    const coneGeo = new THREE.ConeGeometry(0.6, 2.0, 8);
-    const coneMat = new THREE.MeshBasicMaterial({
-      color: 0xffa726, transparent: true, opacity: 0.35,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const cone = new THREE.Mesh(coneGeo, coneMat);
-    cone.position.z = lineLen * 0.6;
-    cone.rotation.x = Math.PI / 2;
-    this.sunGalacticArrow.add(cone);
-
-    // Label at the tip
-    const label = this.makeLabelSprite('GALACTIC', '#ffa726');
-    label.scale.set(3, 0.8, 1);
-    label.position.z = lineLen * 0.6 + 3;
-    label.position.y = 1.5;
-    this.sunGalacticArrow.add(label);
-
-    this.scene.add(this.sunGalacticArrow);
-  }
-
   private buildOrbitalRing(): void {
     const segments = 128;
     const pts: THREE.Vector3[] = [];
@@ -807,13 +769,6 @@ export class CosmicMotionApp {
     const beamArr = new Float32Array([0, 0, 0, sunPos.x, sunPos.y, sunPos.z]);
     this.sunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
-    // Sun's galactic travel direction — arrow through the Sun
-    const galDir = eclToThree(this.data.solarGalacticDir).normalize();
-    this.sunGalacticArrow.position.copy(sunPos);
-    this.sunGalacticArrow.quaternion.setFromUnitVectors(
-      new THREE.Vector3(0, 0, 1), galDir,
-    );
-
     // Orbital ring — centered on the Sun, in the ecliptic plane
     this.orbitalRing.position.copy(sunPos);
 
@@ -901,9 +856,13 @@ export class CosmicMotionApp {
     (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
     (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
 
-    // Ghost Sun — positioned relative to ghost Earth
-    const ghostSunOffset = eclToThree(ghostData.sunDir).multiplyScalar(SUN_DIST);
-    const ghostSunWorldPos = ghostPos.clone().add(ghostSunOffset);
+    // Ghost Sun — on the Sun's straight galactic line at this time offset
+    const primarySunPos = eclToThree(this.data.sunDir).multiplyScalar(SUN_DIST);
+    const galDir = eclToThree(this.data.solarGalacticDir).normalize();
+    const driftPerDay = this.data.solarGalacticSpeedKmS * 86400 / 149597870.7 / 8 * AU_TO_SCENE;
+    const ghostSunWorldPos = primarySunPos.clone().add(
+      galDir.clone().multiplyScalar(offsetDays * driftPerDay),
+    );
     this.ghostSunSprite.position.copy(ghostSunWorldPos);
     this.ghostSunGlow.position.copy(ghostSunWorldPos);
     this.ghostSunLabel.position.copy(ghostSunWorldPos).add(new THREE.Vector3(0, 4, 0));
@@ -958,17 +917,14 @@ export class CosmicMotionApp {
 
     const pts = this.data.trajectory;
 
-    // Split into past and future with overlap at 0
+    // Split Earth trajectory into past and future
     const pastPts: THREE.Vector3[] = [];
     const futurePts: THREE.Vector3[] = [];
-    const sunPastPts: THREE.Vector3[] = [];
-    const sunFuturePts: THREE.Vector3[] = [];
 
     for (const pt of pts) {
       const earthV = eclToThree(pt.pos).multiplyScalar(AU_TO_SCENE);
-      const sunV = earthV.clone().add(eclToThree(pt.sunDir).multiplyScalar(SUN_DIST));
-      if (pt.dayOffset <= 0.01) { pastPts.push(earthV); sunPastPts.push(sunV); }
-      if (pt.dayOffset >= -0.01) { futurePts.push(earthV); sunFuturePts.push(sunV); }
+      if (pt.dayOffset <= 0.01) pastPts.push(earthV);
+      if (pt.dayOffset >= -0.01) futurePts.push(earthV);
     }
 
     // Earth past trajectory — thin purple thread
@@ -1007,23 +963,42 @@ export class CosmicMotionApp {
       this.scene.add(this.trajectoryGlowFuture);
     }
 
-    // Sun past trajectory — warm golden thread
+    // Sun trajectory — straight line through the primary Sun in galactic direction.
+    // The Sun moves linearly through the galaxy; Earth corkscrews around it.
+    const sunPos = eclToThree(this.data.sunDir).multiplyScalar(SUN_DIST);
+    const galDir = eclToThree(this.data.solarGalacticDir).normalize();
+    // Same compressed galactic drift rate used for Earth trajectory
+    const daysRange = pts.length > 0 ? Math.abs(pts[pts.length - 1].dayOffset) : 365;
+    const driftPerDay = this.data.solarGalacticSpeedKmS * 86400 / 149597870.7 / 8 * AU_TO_SCENE;
+
+    const sunPastPts: THREE.Vector3[] = [];
+    const sunFuturePts: THREE.Vector3[] = [];
+    const sunSteps = 60;
+    for (let i = -sunSteps; i <= sunSteps; i++) {
+      const dayOff = (i / sunSteps) * daysRange;
+      const drift = galDir.clone().multiplyScalar(dayOff * driftPerDay);
+      const p = sunPos.clone().add(drift);
+      if (dayOff <= 0.01) sunPastPts.push(p.clone());
+      if (dayOff >= -0.01) sunFuturePts.push(p);
+    }
+
+    // Sun past trajectory — single warm golden line
     if (sunPastPts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(sunPastPts);
-      const geo = new THREE.TubeGeometry(curve, sunPastPts.length * 4, 0.025, 6, false);
+      const geo = new THREE.TubeGeometry(curve, 64, 0.04, 6, false);
       this.sunTrajectoryPast = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffa726, transparent: true, opacity: 0.18,
+        color: 0xffa726, transparent: true, opacity: 0.15,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scene.add(this.sunTrajectoryPast);
     }
 
-    // Sun future trajectory — warm golden thread
+    // Sun future trajectory — single warm golden line
     if (sunFuturePts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(sunFuturePts);
-      const geo = new THREE.TubeGeometry(curve, sunFuturePts.length * 4, 0.03, 6, false);
+      const geo = new THREE.TubeGeometry(curve, 64, 0.05, 6, false);
       this.sunTrajectoryFuture = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffcc00, transparent: true, opacity: 0.22,
+        color: 0xffcc00, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       this.scene.add(this.sunTrajectoryFuture);
