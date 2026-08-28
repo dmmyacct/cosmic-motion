@@ -203,8 +203,8 @@ export class CosmicMotionApp {
 
     // Real bright stars from Hipparcos catalog
     const realCount = BRIGHT_STARS.length;
-    // Dim background stars to fill the sky
-    const bgCount = 6000;
+    // Background stars to fill the sky — mix of bright and dim
+    const bgCount = 20000;
     const totalCount = realCount + bgCount;
     const pos = new Float32Array(totalCount * 3);
     const colors = new Float32Array(totalCount * 3);
@@ -238,7 +238,7 @@ export class CosmicMotionApp {
       sizes[i] = Math.max(1.5, 4.5 - s.mag * 1.0);
     }
 
-    // Background filler stars — dimmer, random
+    // Background filler stars — power-law brightness distribution
     for (let i = realCount; i < totalCount; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
@@ -247,11 +247,44 @@ export class CosmicMotionApp {
       pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = r * Math.cos(phi);
 
-      const dim = 0.15 + Math.random() * 0.25;
-      colors[i * 3]     = dim;
-      colors[i * 3 + 1] = dim;
-      colors[i * 3 + 2] = dim * (0.9 + Math.random() * 0.2);
-      sizes[i] = 0.8 + Math.random() * 0.7;
+      // Power-law: most stars dim, some noticeably bright
+      const roll = Math.random();
+      let brightness: number;
+      let size: number;
+      if (roll < 0.005) {
+        // Rare bright ones
+        brightness = 0.7 + Math.random() * 0.3;
+        size = 2.5 + Math.random() * 1.5;
+      } else if (roll < 0.05) {
+        // Medium-bright
+        brightness = 0.35 + Math.random() * 0.3;
+        size = 1.5 + Math.random() * 1.0;
+      } else if (roll < 0.25) {
+        // Visible but modest
+        brightness = 0.18 + Math.random() * 0.2;
+        size = 1.0 + Math.random() * 0.6;
+      } else {
+        // Dim filler — the majority
+        brightness = 0.08 + Math.random() * 0.15;
+        size = 0.6 + Math.random() * 0.5;
+      }
+
+      // Slight color variation — warm or cool tint
+      const tint = Math.random();
+      if (tint < 0.15) {
+        colors[i * 3]     = brightness * 1.1;
+        colors[i * 3 + 1] = brightness * 0.85;
+        colors[i * 3 + 2] = brightness * 0.7;
+      } else if (tint < 0.3) {
+        colors[i * 3]     = brightness * 0.75;
+        colors[i * 3 + 1] = brightness * 0.85;
+        colors[i * 3 + 2] = brightness * 1.15;
+      } else {
+        colors[i * 3]     = brightness;
+        colors[i * 3 + 1] = brightness;
+        colors[i * 3 + 2] = brightness * (0.95 + Math.random() * 0.1);
+      }
+      sizes[i] = size;
     }
 
     const geo = new THREE.BufferGeometry();
