@@ -1,0 +1,236 @@
+:root {
+  --font: -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  --accent: #00e5ff;
+  --gold: #ffd54f;
+  --glass: rgba(10, 14, 30, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.06);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #020308;
+  font-family: var(--font);
+  color: #e0e6f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  width: 100%; height: 100%;
+  position: relative;
+}
+
+canvas {
+  display: block;
+}
+
+/* ── UI overlay ── */
+
+.cm-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Top: speed readout */
+.cm-header {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.cm-header-pre {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 4px;
+}
+
+.cm-header-speed {
+  font-size: 52px;
+  font-weight: 200;
+  letter-spacing: -1px;
+  color: #fff;
+  line-height: 1.1;
+}
+
+.cm-unit {
+  font-size: 18px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 1px;
+}
+
+.cm-header-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
+  margin-top: 6px;
+  letter-spacing: 0.5px;
+}
+
+.cm-header-date {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.18);
+  margin-top: 4px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* Bottom: time slider */
+.cm-time-panel {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 40px));
+  text-align: center;
+  pointer-events: auto;
+}
+
+.cm-time-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.2);
+  margin-bottom: 8px;
+}
+
+.cm-time-current {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.cm-time-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: linear-gradient(90deg,
+    rgba(124, 77, 255, 0.3),
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(0, 229, 255, 0.3)
+  );
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cm-time-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.4), 0 0 2px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.cm-time-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.4), 0 0 2px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.cm-time-value {
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.5px;
+  min-height: 18px;
+}
+
+/* Hint */
+.cm-hint {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.2);
+  letter-spacing: 1px;
+  white-space: nowrap;
+  transition: opacity 2s ease;
+  pointer-events: none;
+}
+
+/* ── Splash screen ── */
+.cm-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #020308;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.8s ease;
+}
+
+.cm-splash.cm-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cm-splash-inner {
+  text-align: center;
+  max-width: 500px;
+  padding: 40px;
+}
+
+.cm-splash-title {
+  font-size: 28px;
+  font-weight: 200;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: #fff;
+  margin-bottom: 12px;
+}
+
+.cm-splash-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 2px;
+  margin-bottom: 50px;
+  line-height: 1.6;
+}
+
+.cm-splash-enter {
+  display: inline-block;
+  padding: 14px 40px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: var(--font);
+}
+
+.cm-splash-enter:hover {
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #fff;
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.1);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .cm-header-speed { font-size: 36px; }
+  .cm-header-pre { font-size: 9px; }
+  .cm-header { top: 16px; }
+  .cm-time-panel { bottom: 16px; }
+  .cm-hint { bottom: 80px; font-size: 9px; }
+}
