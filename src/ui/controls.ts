@@ -2,10 +2,13 @@
  * UI — left data panel, time scrubber, playback, live mode.
  */
 
+export type UpFrame = 'ecliptic' | 'equatorial' | 'galactic';
+
 export interface UICallbacks {
   onTimeChange: (hours: number) => void;
   onToggleFollow: () => void;
   onToggleLocation: () => void;
+  onUpFrameChange: (frame: UpFrame) => void;
 }
 
 export interface UIUpdateData {
@@ -254,6 +257,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-speed-btn" title="Playback speed">1 hr/s</button>
       <button class="cm-follow-btn" title="Follow ghost">Follow</button>
       <button class="cm-loc-btn active" title="My location">📍</button>
+      <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
   `;
@@ -268,6 +272,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const speedBtn = timePanel.querySelector('.cm-speed-btn') as HTMLButtonElement;
   const followBtn = timePanel.querySelector('.cm-follow-btn') as HTMLButtonElement;
   const locBtn = timePanel.querySelector('.cm-loc-btn') as HTMLButtonElement;
+  const upBtn = timePanel.querySelector('.cm-up-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
   let currentHoursOffset = 0;
@@ -343,6 +348,20 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   locBtn.addEventListener('click', () => {
     locBtn.classList.toggle('active');
     callbacks.onToggleLocation();
+  });
+
+  const UP_FRAMES: UpFrame[] = ['ecliptic', 'equatorial', 'galactic'];
+  const UP_LABELS: Record<UpFrame, string> = {
+    ecliptic: '↑ Ecl',
+    equatorial: '↑ Eq',
+    galactic: '↑ Gal',
+  };
+  let upFrameIdx = 0;
+  upBtn.addEventListener('click', () => {
+    upFrameIdx = (upFrameIdx + 1) % UP_FRAMES.length;
+    const frame = UP_FRAMES[upFrameIdx];
+    upBtn.textContent = UP_LABELS[frame];
+    callbacks.onUpFrameChange(frame);
   });
 
   resetBtn.addEventListener('click', () => {

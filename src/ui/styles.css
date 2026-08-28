@@ -308,6 +308,12 @@ canvas { display: block; }
   background: rgba(0, 229, 255, 0.06);
 }
 
+.cm-up-btn {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
 /* Hint */
 .cm-hint {
   position: absolute;

@@ -16,7 +16,7 @@ import { raDecToCartesian, equatorialToEcliptic, obliquity } from './engine/coor
 import { dateToJD } from './engine/time';
 import { BRIGHT_STARS, bvToRGB } from './engine/stars';
 import { LocationService } from './sensors/location';
-import { createUI } from './ui/controls';
+import { createUI, type UpFrame } from './ui/controls';
 
 const EARTH_R = 0.5;
 const AU_TO_SCENE = 600;
@@ -90,6 +90,10 @@ export class CosmicMotionApp {
   private controls!: OrbitControls;
   private needsDataUpdate = true;
   private firstLoad = true;
+  private scenePivot!: THREE.Group;
+  private upFrame: UpFrame = 'ecliptic';
+  private upQuatTarget = new THREE.Quaternion();
+  private upQuatCurrent = new THREE.Quaternion();
 
   async init(container: HTMLElement): Promise<void> {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -105,9 +109,11 @@ export class CosmicMotionApp {
     );
 
     this.scene = new THREE.Scene();
+    this.scenePivot = new THREE.Group();
+    this.scene.add(this.scenePivot);
 
-    this.scene.add(new THREE.AmbientLight(0x1a1a2e, 0.15));
-    this.scene.add(new THREE.HemisphereLight(0x2244aa, 0x111122, 0.1));
+    this.scenePivot.add(new THREE.AmbientLight(0x1a1a2e, 0.15));
+    this.scenePivot.add(new THREE.HemisphereLight(0x2244aa, 0x111122, 0.1));
 
     this.buildStarfield();
     this.buildEarth();
@@ -123,7 +129,7 @@ export class CosmicMotionApp {
 
     this.sunLabel = this.makeLabelSprite('☉', '#ffd54f');
     this.sunLabel.scale.set(1.4, 0.7, 1);
-    this.scene.add(this.sunLabel);
+    this.scenePivot.add(this.sunLabel);
 
     const beamGeo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
@@ -133,15 +139,15 @@ export class CosmicMotionApp {
       color: 0xffd54f, transparent: true, opacity: 0.12,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    this.scene.add(this.sunBeam);
+    this.scenePivot.add(this.sunBeam);
 
     this.sunDistLabel = this.makeDistLabel();
     this.sunDistLabel.scale.set(8, 1, 1);
-    this.scene.add(this.sunDistLabel);
+    this.scenePivot.add(this.sunDistLabel);
 
     this.moonDistLabel = this.makeDistLabel();
     this.moonDistLabel.scale.set(5, 0.65, 1);
-    this.scene.add(this.moonDistLabel);
+    this.scenePivot.add(this.moonDistLabel);
 
     this.ui = createUI(container, {
       onTimeChange: (hours) => {
@@ -154,6 +160,10 @@ export class CosmicMotionApp {
       },
       onToggleLocation: () => {
         this.locVisible = !this.locVisible;
+      },
+      onUpFrameChange: (frame: UpFrame) => {
+        this.upFrame = frame;
+        this.upQuatTarget.copy(this.getFrameQuaternion(frame));
       },
     });
 
@@ -276,7 +286,7 @@ export class CosmicMotionApp {
     });
 
     this.starfield = new THREE.Points(geo, mat);
-    this.scene.add(this.starfield);
+    this.scenePivot.add(this.starfield);
   }
 
   private buildEarth(): void {
@@ -338,7 +348,7 @@ export class CosmicMotionApp {
       `,
     });
     this.earth = new THREE.Mesh(geo, earthMat);
-    this.scene.add(this.earth);
+    this.scenePivot.add(this.earth);
 
     // Cloud layer — slightly larger sphere, semi-transparent white clouds
     const cloudGeo = new THREE.SphereGeometry(EARTH_R * 1.015, 64, 64);
@@ -372,7 +382,7 @@ export class CosmicMotionApp {
       depthWrite: false,
     });
     this.clouds = new THREE.Mesh(cloudGeo, cloudMat);
-    this.scene.add(this.clouds);
+    this.scenePivot.add(this.clouds);
 
     // Fresnel atmosphere rim
     const atmoGeo = new THREE.SphereGeometry(EARTH_R * 1.06, 64, 64);
@@ -413,12 +423,12 @@ export class CosmicMotionApp {
       side: THREE.FrontSide,
     });
     this.atmosphere = new THREE.Mesh(atmoGeo, atmoMat);
-    this.scene.add(this.atmosphere);
+    this.scenePivot.add(this.atmosphere);
   }
 
   private buildSun(): void {
     this.sunLight = new THREE.PointLight(0xfff4e0, 3, 500, 0.3);
-    this.scene.add(this.sunLight);
+    this.scenePivot.add(this.sunLight);
 
     const c = document.createElement('canvas');
     c.width = 128; c.height = 128;
@@ -435,7 +445,7 @@ export class CosmicMotionApp {
       map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     this.sunSprite.scale.set(14, 14, 1);
-    this.scene.add(this.sunSprite);
+    this.scenePivot.add(this.sunSprite);
 
     const gc = document.createElement('canvas');
     gc.width = 256; gc.height = 256;
@@ -451,7 +461,7 @@ export class CosmicMotionApp {
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     this.sunGlow.scale.set(50, 50, 1);
-    this.scene.add(this.sunGlow);
+    this.scenePivot.add(this.sunGlow);
   }
 
   private buildMoon(): void {
@@ -480,7 +490,7 @@ export class CosmicMotionApp {
       `,
     });
     this.moonMesh = new THREE.Mesh(geo, moonMat);
-    this.scene.add(this.moonMesh);
+    this.scenePivot.add(this.moonMesh);
 
     // Moon orbital path — computed from actual lunar ephemeris over one sidereal month
     this.moonOrbitLine = new THREE.Line(
@@ -489,7 +499,7 @@ export class CosmicMotionApp {
         color: 0x999999, transparent: true, opacity: 0.1, depthWrite: false,
       }),
     );
-    this.scene.add(this.moonOrbitLine);
+    this.scenePivot.add(this.moonOrbitLine);
   }
 
   private buildLocationMarker(): void {
@@ -502,7 +512,7 @@ export class CosmicMotionApp {
     });
     this.locDot = new THREE.Mesh(dotGeo, dotMat);
     this.locMarker.add(this.locDot);
-    this.scene.add(this.locMarker);
+    this.scenePivot.add(this.locMarker);
 
     // HTML overlay — projected from 3D to screen each frame
     this.locOverlay = document.createElement('div');
@@ -660,6 +670,45 @@ export class CosmicMotionApp {
     return { earthKm: earthAU * AU_KM, sunKm };
   }
 
+  private getFrameQuaternion(frame: UpFrame): THREE.Quaternion {
+    const q = new THREE.Quaternion();
+    if (frame === 'ecliptic') {
+      // Identity — ecliptic Z is already mapped to Three.js Y (up)
+      return q;
+    }
+    if (frame === 'equatorial') {
+      // Rotate so Earth's spin axis (tilted ~23.44° from ecliptic north) becomes Y-up
+      // In ecliptic coords, the equatorial north pole is at ecliptic lon=270°(=–X), lat=66.56°
+      // eclToThree maps ecl(0,0,1) → Y. We need ecl rotated so that the equatorial pole → Y.
+      // Equatorial north in ecliptic: (0, -sin(ε), cos(ε)) where ε ≈ 23.44°
+      // In Three.js via eclToThree: (0, cos(ε), sin(ε))
+      // We need to rotate this vector to (0,1,0)
+      const eps = 23.4393 * Math.PI / 180;
+      const axis = new THREE.Vector3(1, 0, 0); // rotate around X
+      q.setFromAxisAngle(axis, eps);
+      return q;
+    }
+    if (frame === 'galactic') {
+      // Galactic north pole in ecliptic coords: (lon≈180.02°, lat≈29.81°)
+      // Simplified: galactic north in ecliptic ≈ (-cos(29.8°)·cos(0°), -cos(29.8°)·sin(0°), sin(29.8°))
+      // More precisely, galactic north pole (J2000): RA=12h51m, Dec=+27°07'
+      // In ecliptic: lon≈180.02°, lat≈29.81°
+      const lonRad = 180.02 * Math.PI / 180;
+      const latRad = 29.81 * Math.PI / 180;
+      const galNorthEcl: [number, number, number] = [
+        Math.cos(latRad) * Math.cos(lonRad),
+        Math.cos(latRad) * Math.sin(lonRad),
+        Math.sin(latRad),
+      ];
+      const galNorthThree = new THREE.Vector3(
+        galNorthEcl[0], galNorthEcl[2], -galNorthEcl[1],
+      ).normalize();
+      q.setFromUnitVectors(galNorthThree, new THREE.Vector3(0, 1, 0));
+      return q;
+    }
+    return q;
+  }
+
   private fmtTravelDist(km: number): string {
     if (km >= 1e12) return `${(km / 1e9).toFixed(1)}B km`;
     if (km >= 1e9) return `${(km / 1e9).toFixed(2)}B km`;
@@ -677,7 +726,7 @@ export class CosmicMotionApp {
     this.northSweep.position.y = axisLen;
     this.poleSweepGroup.add(this.northSweep);
 
-    this.scene.add(this.poleSweepGroup);
+    this.scenePivot.add(this.poleSweepGroup);
   }
 
   private createSweepArc(radius: number, brightness: number): THREE.Group {
@@ -738,7 +787,7 @@ export class CosmicMotionApp {
     });
     this.axisLine = new THREE.Line(geo, mat);
     this.axisLine.computeLineDistances();
-    this.scene.add(this.axisLine);
+    this.scenePivot.add(this.axisLine);
   }
 
   private buildArrow(): void {
@@ -753,7 +802,7 @@ export class CosmicMotionApp {
     (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).blending = THREE.AdditiveBlending;
     (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).transparent = true;
     (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).opacity = 0.4;
-    this.scene.add(this.arrowHelper);
+    this.scenePivot.add(this.arrowHelper);
   }
 
   private buildOrbitalRing(): void {
@@ -772,7 +821,7 @@ export class CosmicMotionApp {
       color: 0x4fc3f7, transparent: true, opacity: 0.08,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    this.scene.add(this.orbitalRing);
+    this.scenePivot.add(this.orbitalRing);
   }
 
   private rebuildMoonOrbit(date: Date): void {
@@ -1031,14 +1080,14 @@ export class CosmicMotionApp {
     this.earthTravelLabel = this.makeDistLabel();
     this.earthTravelLabel.scale.set(7, 0.9, 1);
     this.earthTravelLabel.visible = false;
-    this.scene.add(this.earthTravelLabel);
+    this.scenePivot.add(this.earthTravelLabel);
 
     this.sunTravelLabel = this.makeDistLabel();
     this.sunTravelLabel.scale.set(7, 0.9, 1);
     this.sunTravelLabel.visible = false;
-    this.scene.add(this.sunTravelLabel);
+    this.scenePivot.add(this.sunTravelLabel);
 
-    this.scene.add(this.ghostGroup);
+    this.scenePivot.add(this.ghostGroup);
   }
 
   // ── Update scene from engine data ──
@@ -1372,7 +1421,7 @@ export class CosmicMotionApp {
         color: 0x9c6dff, transparent: true, opacity: 0.4,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scene.add(line);
+      this.scenePivot.add(line);
       this.trajectoryMesh = line as unknown as THREE.Mesh;
     }
 
@@ -1384,7 +1433,7 @@ export class CosmicMotionApp {
         color: 0x00e5ff, transparent: true, opacity: 0.5,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scene.add(line);
+      this.scenePivot.add(line);
       this.trajectoryForwardMesh = line as unknown as THREE.Mesh;
     }
 
@@ -1415,7 +1464,7 @@ export class CosmicMotionApp {
         color: 0xffa726, transparent: true, opacity: 0.15,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scene.add(this.sunTrajectoryPast);
+      this.scenePivot.add(this.sunTrajectoryPast);
     }
 
     // Sun future trajectory — single warm golden line
@@ -1426,7 +1475,7 @@ export class CosmicMotionApp {
         color: 0xffcc00, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }));
-      this.scene.add(this.sunTrajectoryFuture);
+      this.scenePivot.add(this.sunTrajectoryFuture);
     }
   }
 
@@ -1543,6 +1592,10 @@ export class CosmicMotionApp {
     } else if (!this.followGhost) {
       this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.06);
     }
+
+    // Smoothly interpolate scene pivot toward target "up" frame
+    this.upQuatCurrent.slerp(this.upQuatTarget, 0.06);
+    this.scenePivot.quaternion.copy(this.upQuatCurrent);
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
