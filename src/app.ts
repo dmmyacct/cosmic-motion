@@ -1724,7 +1724,7 @@ export class CosmicMotionApp {
     const camDist = this.camera.position.distanceTo(bodyPos);
     const angularSize = camDist > 0.01 ? bodyRadius / camDist : 0;
     const pixelRadius = angularSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
-    const reticleSize = Math.max(60, Math.min(200, pixelRadius * 3 + 40));
+    const reticleSize = Math.max(60, pixelRadius * 2.6 + 40);
     const halfR = reticleSize / 2;
     this.hudReticle.style.width = `${reticleSize}px`;
     this.hudReticle.style.height = `${reticleSize}px`;
