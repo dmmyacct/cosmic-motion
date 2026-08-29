@@ -16,6 +16,28 @@ export interface UICallbacks {
   onToggleAllBeams: () => void;
 }
 
+export interface PlanetPanelData {
+  name: string;
+  symbol: string;
+  color: string;
+  distAU: number;
+  orbitalSpeedKmS: number;
+  perihelionAU: number;
+  aphelionAU: number;
+  solarIrradiance: number;
+  periodDays: number;
+  dayInOrbit: number;
+  percentComplete: number;
+  distFromEarthAU: number;
+  /** Sidereal rotation period in hours. Negative = retrograde. */
+  siderealRotationHours: number;
+  axialTiltDeg: number;
+  surfaceGravityMs2: number;
+  escapeVelocityKmS: number;
+  eccentricity: number;
+  inclinationDeg: number;
+}
+
 export interface UIUpdateData {
   speedKmS: number;
   orbitalSpeedKmS: number;
@@ -34,7 +56,7 @@ export interface UIUpdateData {
   sunDistTraveled?: number;
   planetAngles?: { name: string; angle: number }[];
   planetOrbits?: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[];
-  planetDistances?: { name: string; distAU: number; symbol: string; color: string }[];
+  planetData?: PlanetPanelData[];
   earthOrbitPeriodDays?: number;
   earthOrbitPercent?: number;
   currentBody?: string;
@@ -185,74 +207,47 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const panel = document.createElement('div');
   panel.className = 'cm-panel';
   panel.innerHTML = `
-    <div class="cm-panel-mode">
-      <span class="cm-live-dot"></span>
-      <span class="cm-mode-label">LIVE</span>
-      <span class="cm-panel-date"></span>
+    <div class="cm-panel-header">
+      <div class="cm-panel-mode">
+        <span class="cm-live-dot"></span>
+        <span class="cm-mode-label">LIVE</span>
+        <span class="cm-panel-date"></span>
+      </div>
+      <button class="cm-panel-toggle" title="Toggle table">▾</button>
     </div>
-
-    <div class="cm-body-section cm-sun-section">
-      <div class="cm-body-header">
-        <span class="cm-body-icon">☉</span> Sun
-      </div>
-      <div class="cm-body-stats">
-        <div class="cm-stat"><span class="cm-stat-label">Galactic speed</span><span class="cm-stat-value cm-sun-galactic-speed">230 km/s</span></div>
-      </div>
-
-      <div class="cm-body-section cm-earth-section">
-        <div class="cm-body-header">
-          <span class="cm-body-icon cm-earth-icon">⊕</span> Earth
-        </div>
-        <div class="cm-body-stats">
-          <div class="cm-stat"><span class="cm-stat-label">Sun dist</span><span class="cm-stat-value cm-earth-sun-dist">1.000 AU</span></div>
-          <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value cm-earth-sun-dist-km">149.6M km</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-earth-sun-light">8m 19s</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Orbit</span><span class="cm-stat-value cm-earth-orbit">365.3 days</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Progress</span><span class="cm-stat-value cm-earth-orbit-pct">0.0%</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Orbital speed</span><span class="cm-stat-value cm-earth-orbital-speed">29.78 km/s</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Space velocity</span><span class="cm-stat-value cm-earth-total-speed">234.6 km/s</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Rotation</span><span class="cm-stat-value cm-earth-rotation-speed">1,674 km/h</span></div>
-          <div class="cm-stat"><span class="cm-stat-label">Axial tilt</span><span class="cm-stat-value cm-earth-tilt">23.44°</span></div>
-        </div>
-
-        <div class="cm-body-section cm-moon-section">
-          <div class="cm-body-header">
-            <span class="cm-body-icon cm-moon-icon">☽</span> Moon
-          </div>
-          <div class="cm-body-stats">
-            <div class="cm-stat"><span class="cm-stat-label">Phase</span><span class="cm-stat-value cm-moon-phase">🌕 Full Moon</span></div>
-            <div class="cm-stat"><span class="cm-stat-label">Illumination</span><span class="cm-stat-value cm-moon-illum">100%</span></div>
-            <div class="cm-stat"><span class="cm-stat-label">Distance</span><span class="cm-stat-value cm-moon-dist">384,400 km</span></div>
-            <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-moon-light">1.3s</span></div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <div class="cm-planets-section"></div>
+    <div class="cm-table-wrap"></div>
   `;
   ui.appendChild(panel);
 
-  // Cache DOM references
   const panelDate = panel.querySelector('.cm-panel-date')!;
   const modeDot = panel.querySelector('.cm-live-dot') as HTMLElement;
   const modeLabel = panel.querySelector('.cm-mode-label')!;
-  const sunGalSpeed = panel.querySelector('.cm-sun-galactic-speed')!;
-  const earthSunDist = panel.querySelector('.cm-earth-sun-dist')!;
-  const earthSunDistKm = panel.querySelector('.cm-earth-sun-dist-km')!;
-  const earthSunLight = panel.querySelector('.cm-earth-sun-light')!;
-  const earthOrbitEl = panel.querySelector('.cm-earth-orbit')!;
-  const earthOrbitPct = panel.querySelector('.cm-earth-orbit-pct')!;
-  const earthTotalSpeed = panel.querySelector('.cm-earth-total-speed')!;
-  const earthOrbitalSpeed = panel.querySelector('.cm-earth-orbital-speed')!;
-  const earthRotSpeed = panel.querySelector('.cm-earth-rotation-speed')!;
-  const earthTilt = panel.querySelector('.cm-earth-tilt')!;
-  const moonPhase = panel.querySelector('.cm-moon-phase')!;
-  const moonIllum = panel.querySelector('.cm-moon-illum')!;
-  const moonDist = panel.querySelector('.cm-moon-dist')!;
-  const moonLight = panel.querySelector('.cm-moon-light')!;
-  const planetsSection = panel.querySelector('.cm-planets-section') as HTMLElement;
+  const tableWrap = panel.querySelector('.cm-table-wrap') as HTMLElement;
+  const toggleBtn = panel.querySelector('.cm-panel-toggle') as HTMLElement;
+
+  let tableVisible = true;
+  toggleBtn.addEventListener('click', () => {
+    tableVisible = !tableVisible;
+    tableWrap.style.display = tableVisible ? '' : 'none';
+    toggleBtn.textContent = tableVisible ? '▾' : '▸';
+    panel.classList.toggle('cm-collapsed', !tableVisible);
+  });
+
+  tableWrap.addEventListener('click', (e) => {
+    const row = (e.target as HTMLElement).closest('.cm-trow') as HTMLElement | null;
+    if (!row) return;
+    const name = row.dataset.body;
+    if (name) callbacks.onNavigate(name);
+  });
+  tableWrap.addEventListener('mouseover', (e) => {
+    const row = (e.target as HTMLElement).closest('.cm-trow') as HTMLElement | null;
+    if (!row) return;
+    const name = row.dataset.body;
+    if (name) callbacks.onHoverBody(name);
+  });
+  tableWrap.addEventListener('mouseleave', () => {
+    callbacks.onHoverBody(null);
+  });
 
   // ── Bottom: time controls ──
   const timePanel = document.createElement('div');
@@ -616,34 +611,9 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
   return {
     update(data: UIUpdateData) {
-      // Date
       panelDate.textContent = data.date.toLocaleTimeString('en-US', {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
-
-      // Sun
-      sunGalSpeed.textContent = `${data.solarGalacticSpeedKmS.toFixed(0)} km/s`;
-      const sunKm = data.sunDistAU * AU_KM;
-
-      // Earth
-      earthSunDist.textContent = `${data.sunDistAU.toFixed(4)} AU`;
-      earthSunDistKm.textContent = fmtDist(sunKm);
-      earthSunLight.textContent = fmtLightTime(sunKm);
-      if (data.earthOrbitPeriodDays != null) earthOrbitEl.textContent = `${data.earthOrbitPeriodDays.toFixed(1)} days`;
-      if (data.earthOrbitPercent != null) earthOrbitPct.textContent = `${data.earthOrbitPercent.toFixed(1)}%`;
-      earthTotalSpeed.textContent = `${data.speedKmS.toFixed(2)} km/s`;
-      earthOrbitalSpeed.textContent = `${data.orbitalSpeedKmS.toFixed(2)} km/s`;
-      const rotSpeedKmH = EARTH_CIRCUMFERENCE_KM / SIDEREAL_DAY_H;
-      earthRotSpeed.textContent = `${Math.round(rotSpeedKmH).toLocaleString()} km/h`;
-      earthTilt.textContent = `${(data.obliquity * 180 / Math.PI).toFixed(2)}°`;
-
-      // Moon
-      const phaseAngle = data.moonPhaseAngle;
-      const waxing = data.moonPhaseWaxing;
-      moonPhase.textContent = `${moonPhaseEmoji(phaseAngle, waxing)} ${moonPhaseName(phaseAngle, waxing)}`;
-      moonIllum.textContent = `${(moonIllumination(phaseAngle) * 100).toFixed(1)}%`;
-      moonDist.textContent = fmtDist(data.moonDistKm);
-      moonLight.textContent = fmtLightTime(data.moonDistKm);
 
       // Distance traveled (visible during time travel)
       if (data.earthDistTraveled && data.earthDistTraveled > 100) {
@@ -655,35 +625,90 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
         travelDistEl.style.display = 'none';
       }
 
-      // Planet sections
-      if (data.planetDistances && data.planetOrbits) {
+      // Build full data table — all values as columns
+      if (data.planetData) {
         const focused = data.currentBody;
-        let html = '';
-        for (const pd of data.planetDistances) {
-          if (pd.name === 'Earth') continue;
-          const orbit = data.planetOrbits?.find(o => o.name === pd.name);
-          const distKm = pd.distAU * AU_KM;
+
+        let html = `<table class="cm-data-table"><thead><tr>
+          <th class="cm-th-sticky"></th>
+          <th title="Distance from Sun (AU)">☉ Dist<span class="cm-th-unit">AU</span></th>
+          <th title="Distance from Earth (AU)">⊕ Dist<span class="cm-th-unit">AU</span></th>
+          <th title="Light travel time from Sun">Light</th>
+          <th title="Orbital speed (km/s)">Speed<span class="cm-th-unit">km/s</span></th>
+          <th title="Orbital period">Orbit</th>
+          <th title="Orbit progress">Prog</th>
+          <th title="Perihelion distance (AU)">Peri<span class="cm-th-unit">AU</span></th>
+          <th title="Aphelion distance (AU)">Aph<span class="cm-th-unit">AU</span></th>
+          <th title="Orbital eccentricity">Ecc</th>
+          <th title="Orbital inclination (°)">Inc</th>
+          <th title="Sidereal rotation period">Rot</th>
+          <th title="Axial tilt (°)">Tilt</th>
+          <th title="Surface gravity (m/s²)">Grav<span class="cm-th-unit">m/s²</span></th>
+          <th title="Escape velocity (km/s)">Esc<span class="cm-th-unit">km/s</span></th>
+          <th title="Solar irradiance (× Earth)">Irr<span class="cm-th-unit">×⊕</span></th>
+        </tr></thead><tbody>`;
+
+        // Sun row
+        html += `<tr class="cm-trow${focused === 'Sun' ? ' cm-active' : ''}" data-body="Sun">
+          <td class="cm-tcell-name cm-th-sticky" style="color:#ffd54f">☉ Sun</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">${data.solarGalacticSpeedKmS.toFixed(0)}</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">—</td>
+          <td class="cm-tcell">274.0</td>
+          <td class="cm-tcell">617.5</td>
+          <td class="cm-tcell">—</td>
+        </tr>`;
+
+        for (const pd of data.planetData) {
+          const isEarth = pd.name === 'Earth';
+          const distAU = pd.distAU;
+          const distKm = distAU * AU_KM;
+          const speed = isEarth ? data.orbitalSpeedKmS : pd.orbitalSpeedKmS;
+          const pct = isEarth ? (data.earthOrbitPercent ?? pd.percentComplete) : pd.percentComplete;
           const isFocused = focused === pd.name;
-          const periodStr = orbit
-            ? (orbit.periodDays > 600
-              ? `${(orbit.periodDays / 365.25).toFixed(2)} yrs`
-              : `${orbit.periodDays.toFixed(1)} days`)
-            : '';
-          html += `<div class="cm-body-section cm-planet-row${isFocused ? ' cm-focused' : ''}">
-            <div class="cm-body-header" style="color: ${pd.color}">
-              <span class="cm-body-icon">${pd.symbol}</span> ${pd.name}
-            </div>
-            <div class="cm-body-stats">
-              <div class="cm-stat"><span class="cm-stat-label">Sun dist</span><span class="cm-stat-value">${pd.distAU.toFixed(3)} AU</span></div>
-              <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value">${fmtDist(distKm)}</span></div>
-              <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value">${fmtLightTime(distKm)}</span></div>`;
-          if (orbit) {
-            html += `<div class="cm-stat"><span class="cm-stat-label">Orbit</span><span class="cm-stat-value">${periodStr}</span></div>
-              <div class="cm-stat"><span class="cm-stat-label">Progress</span><span class="cm-stat-value">${orbit.percentComplete.toFixed(1)}%</span></div>`;
-          }
-          html += `</div></div>`;
+
+          const periodStr = pd.periodDays > 600
+            ? `${(pd.periodDays / 365.25).toFixed(1)}y`
+            : `${pd.periodDays.toFixed(0)}d`;
+          const rotHrs = Math.abs(pd.siderealRotationHours);
+          const rotDir = pd.siderealRotationHours < 0 ? '↺' : '↻';
+          const rotStr = rotHrs > 48
+            ? `${(rotHrs / 24).toFixed(0)}d${rotDir}`
+            : `${rotHrs.toFixed(1)}h${rotDir}`;
+          const irr = pd.solarIrradiance;
+          const irradStr = irr >= 1 ? `${irr.toFixed(1)}` : `${irr.toFixed(3)}`;
+
+          html += `<tr class="cm-trow${isFocused ? ' cm-active' : ''}" data-body="${pd.name}">
+            <td class="cm-tcell-name cm-th-sticky" style="color:${pd.color}">${pd.symbol} ${pd.name}</td>
+            <td class="cm-tcell">${distAU.toFixed(2)}</td>
+            <td class="cm-tcell">${isEarth ? '—' : pd.distFromEarthAU.toFixed(2)}</td>
+            <td class="cm-tcell">${fmtLightTime(distKm)}</td>
+            <td class="cm-tcell">${speed.toFixed(1)}</td>
+            <td class="cm-tcell">${periodStr}</td>
+            <td class="cm-tcell">${pct.toFixed(0)}%</td>
+            <td class="cm-tcell">${pd.perihelionAU.toFixed(2)}</td>
+            <td class="cm-tcell">${pd.aphelionAU.toFixed(2)}</td>
+            <td class="cm-tcell">${pd.eccentricity.toFixed(3)}</td>
+            <td class="cm-tcell">${pd.inclinationDeg.toFixed(1)}°</td>
+            <td class="cm-tcell">${rotStr}</td>
+            <td class="cm-tcell">${pd.axialTiltDeg.toFixed(1)}°</td>
+            <td class="cm-tcell">${pd.surfaceGravityMs2.toFixed(1)}</td>
+            <td class="cm-tcell">${pd.escapeVelocityKmS.toFixed(1)}</td>
+            <td class="cm-tcell">${irradStr}</td>
+          </tr>`;
         }
-        planetsSection.innerHTML = html;
+
+        html += '</tbody></table>';
+        tableWrap.innerHTML = html;
       }
 
       updateNavWidget(data.planetAngles, data.planetOrbits, data.currentBody);

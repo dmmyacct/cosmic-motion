@@ -16,7 +16,7 @@ import { dateToJD } from './engine/time';
 import { BRIGHT_STARS, bvToRGB } from './engine/stars';
 import { LocationService } from './sensors/location';
 import { createUI, type UpFrame } from './ui/controls';
-import { PLANETS, computePlanetPositions, computeOrbitPath } from './engine/planets';
+import { PLANETS, computePlanetPositions, computeOrbitPath, poleToEclipticAxis } from './engine/planets';
 
 const EARTH_R = 0.5;
 const AU_SCENE = 50;
@@ -107,6 +107,9 @@ export class CosmicMotionApp {
   private planetMeshes = new Map<string, THREE.Mesh>();
   private planetGlows = new Map<string, THREE.Sprite>();
   private planetOrbitLines = new Map<string, THREE.Line>();
+  private planetAxisLines = new Map<string, THREE.Line>();
+  private planetGroups = new Map<string, THREE.Group>();
+  private planetSweeps = new Map<string, THREE.Group>();
   private planetOrbitsGroup!: THREE.Group;
   private hoveredBody: string | null = null;
   private showOrbits = true;
@@ -749,6 +752,10 @@ export class CosmicMotionApp {
 
       if (planet.name === 'Earth') continue;
 
+      const group = new THREE.Group();
+      this.scenePivot.add(group);
+      this.planetGroups.set(planet.name, group);
+
       const geo = new THREE.SphereGeometry(planet.sceneRadius, 24, 24);
       const mat = new THREE.ShaderMaterial({
         uniforms: {
@@ -774,8 +781,40 @@ export class CosmicMotionApp {
         `,
       });
       const mesh = new THREE.Mesh(geo, mat);
-      this.scenePivot.add(mesh);
+      group.add(mesh);
       this.planetMeshes.set(planet.name, mesh);
+
+      // Axis tilt line from IAU pole direction
+      const poleEcl = poleToEclipticAxis(planet.poleRA, planet.poleDec);
+      const poleDir = eclToThree(poleEcl).normalize();
+      const axisLen = planet.sceneRadius * 2.5;
+      const axisGeo = new THREE.BufferGeometry().setFromPoints([
+        poleDir.clone().multiplyScalar(-axisLen),
+        poleDir.clone().multiplyScalar(axisLen),
+      ]);
+      const axisMat = new THREE.LineDashedMaterial({
+        color: new THREE.Color(planet.color),
+        transparent: true, opacity: 0.3,
+        dashSize: planet.sceneRadius * 0.25,
+        gapSize: planet.sceneRadius * 0.12,
+      });
+      const axisLine = new THREE.Line(axisGeo, axisMat);
+      axisLine.computeLineDistances();
+      group.add(axisLine);
+      this.planetAxisLines.set(planet.name, axisLine);
+
+      // Apply axial tilt to the mesh via the pole direction
+      const defaultUp = new THREE.Vector3(0, 1, 0);
+      const tiltQuat = new THREE.Quaternion().setFromUnitVectors(defaultUp, poleDir);
+      mesh.quaternion.copy(tiltQuat);
+
+      // Rotation sweep arc at the north pole
+      const sweepRadius = planet.sceneRadius * 0.7;
+      const sweepArc = this.createPlanetSweep(sweepRadius, planet.color, planet.siderealRotationHours < 0);
+      sweepArc.position.copy(poleDir.clone().multiplyScalar(axisLen));
+      sweepArc.quaternion.copy(tiltQuat);
+      group.add(sweepArc);
+      this.planetSweeps.set(planet.name, sweepArc);
 
       const c = new THREE.Color(planet.color);
       const glowCanvas = document.createElement('canvas');
@@ -792,7 +831,7 @@ export class CosmicMotionApp {
       }));
       const glowSize = planet.sceneRadius + Math.sqrt(planet.sceneRadius) * 4;
       glowSprite.scale.set(glowSize, glowSize, 1);
-      this.scenePivot.add(glowSprite);
+      group.add(glowSprite);
       this.planetGlows.set(planet.name, glowSprite);
     }
   }
@@ -850,8 +889,10 @@ export class CosmicMotionApp {
   private getBodyScenePos(name: string): THREE.Vector3 {
     if (name === 'Sun') return new THREE.Vector3(0, 0, 0);
     if (name === 'Earth') return this.earthGroup.position.clone();
+    const group = this.planetGroups.get(name);
+    if (group) return group.position.clone();
     const mesh = this.planetMeshes.get(name);
-    return mesh ? mesh.position.clone() : this.earthGroup.position.clone();
+    return mesh ? mesh.getWorldPosition(new THREE.Vector3()) : this.earthGroup.position.clone();
   }
 
   private buildLocationMarker(): void {
@@ -1169,6 +1210,52 @@ export class CosmicMotionApp {
     return group;
   }
 
+  private createPlanetSweep(radius: number, colorHex: string, retrograde: boolean): THREE.Group {
+    const group = new THREE.Group();
+    const arcAngle = Math.PI * 1.6;
+    const segments = 60;
+    const c = new THREE.Color(colorHex);
+
+    const positions = new Float32Array((segments + 1) * 3);
+    const colors = new Float32Array((segments + 1) * 3);
+    const dir = retrograde ? -1 : 1;
+
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const angle = t * arcAngle * dir;
+      positions[i * 3] = radius * Math.cos(angle);
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = radius * Math.sin(angle);
+
+      const fade = Math.pow(1.0 - t, 2.0) * 0.8;
+      colors[i * 3] = c.r * fade;
+      colors[i * 3 + 1] = c.g * fade;
+      colors[i * 3 + 2] = c.b * fade;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })));
+
+    const coneSize = Math.max(0.02, radius * 0.12);
+    const coneGeo = new THREE.ConeGeometry(coneSize, coneSize * 3.5, 6);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(colorHex), transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(radius, 0, 0);
+    const tangent = new THREE.Vector3(0, 0, retrograde ? 1 : -1);
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+    group.add(cone);
+
+    return group;
+  }
+
   private buildAxisLine(): void {
     const len = EARTH_R * 2.5;
     const geo = new THREE.BufferGeometry().setFromPoints([
@@ -1189,13 +1276,7 @@ export class CosmicMotionApp {
       new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 0),
       EARTH_R * 3, 0x00e5ff, 0.2, 0.1,
     );
-    this.arrowHelper.line.material = new THREE.LineBasicMaterial({
-      color: 0x00e5ff, transparent: true, opacity: 0.3,
-      blending: THREE.AdditiveBlending,
-    });
-    (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).blending = THREE.AdditiveBlending;
-    (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).transparent = true;
-    (this.arrowHelper.cone.material as THREE.MeshBasicMaterial).opacity = 0.4;
+    this.arrowHelper.visible = false;
     this.earthGroup.add(this.arrowHelper);
   }
 
@@ -1558,29 +1639,57 @@ export class CosmicMotionApp {
     const planetPositions = computePlanetPositions(date);
     const planetAnglesForUI: { name: string; angle: number }[] = [];
     const planetOrbitsForUI: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[] = [];
-    const planetDistancesForUI: { name: string; distAU: number; symbol: string; color: string }[] = [];
     let earthOrbitPeriod = 365.25;
     let earthOrbitPercent = 0;
+    let earthOrbitalSpeed = 29.78;
+
+    const earthPP = planetPositions.find(pp => pp.name === 'Earth');
+    const earthPos = earthPP?.helioEcliptic ?? [0, 0, 0];
+    if (earthPP) {
+      earthOrbitPeriod = earthPP.periodDays;
+      earthOrbitPercent = earthPP.percentComplete;
+      earthOrbitalSpeed = earthPP.orbitalSpeedKmS;
+    }
+
+    const planetDataForUI: import('./ui/controls').PlanetPanelData[] = [];
 
     for (const pp of planetPositions) {
       planetAnglesForUI.push({ name: pp.name, angle: pp.orbitAngle });
       planetOrbitsForUI.push({ name: pp.name, periodDays: pp.periodDays, dayInOrbit: pp.dayInOrbit, percentComplete: pp.percentComplete });
       const pInfo = PLANETS.find(p => p.name === pp.name);
-      if (pInfo) planetDistancesForUI.push({ name: pp.name, distAU: pp.distanceAU, symbol: pInfo.symbol, color: pInfo.color });
-      if (pp.name === 'Earth') {
-        earthOrbitPeriod = pp.periodDays;
-        earthOrbitPercent = pp.percentComplete;
-        continue;
+      if (pInfo) {
+        const dx = pp.helioEcliptic[0] - earthPos[0];
+        const dy = pp.helioEcliptic[1] - earthPos[1];
+        const dz = pp.helioEcliptic[2] - earthPos[2];
+        const distFromEarthAU = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        planetDataForUI.push({
+          name: pp.name, symbol: pInfo.symbol, color: pInfo.color,
+          distAU: pp.distanceAU,
+          orbitalSpeedKmS: pp.orbitalSpeedKmS,
+          perihelionAU: pp.perihelionAU,
+          aphelionAU: pp.aphelionAU,
+          solarIrradiance: pp.solarIrradiance,
+          periodDays: pp.periodDays,
+          dayInOrbit: pp.dayInOrbit,
+          percentComplete: pp.percentComplete,
+          distFromEarthAU,
+          siderealRotationHours: pInfo.siderealRotationHours,
+          axialTiltDeg: pInfo.axialTiltDeg,
+          surfaceGravityMs2: pInfo.surfaceGravityMs2,
+          escapeVelocityKmS: pInfo.escapeVelocityKmS,
+          eccentricity: pInfo.eccentricity,
+          inclinationDeg: pInfo.inclination,
+        });
       }
+      if (pp.name === 'Earth') continue;
       const pos = eclToThree(pp.helioEcliptic).multiplyScalar(AU_SCENE);
+      const group = this.planetGroups.get(pp.name);
+      if (group) group.position.copy(pos);
       const mesh = this.planetMeshes.get(pp.name);
       if (mesh) {
-        mesh.position.copy(pos);
         const toSun = pos.clone().negate().normalize();
         (mesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
       }
-      const glow = this.planetGlows.get(pp.name);
-      if (glow) glow.position.copy(pos);
     }
 
     // On first load, place camera near Earth looking toward the Sun
@@ -1700,7 +1809,7 @@ export class CosmicMotionApp {
 
     this.ui.update({
       speedKmS: this.data.speedKmS,
-      orbitalSpeedKmS: this.data.orbitalSpeedKmS,
+      orbitalSpeedKmS: earthOrbitalSpeed,
       solarGalacticSpeedKmS: this.data.solarGalacticSpeedKmS,
       sunDistAU: this.data.sunDistAU,
       moonDistKm: this.data.moonDistKm,
@@ -1713,7 +1822,7 @@ export class CosmicMotionApp {
       sunDistTraveled: travel?.sunKm,
       planetAngles: planetAnglesForUI,
       planetOrbits: planetOrbitsForUI,
-      planetDistances: planetDistancesForUI,
+      planetData: planetDataForUI,
       earthOrbitPeriodDays: earthOrbitPeriod,
       earthOrbitPercent: earthOrbitPercent,
       currentBody: this.currentBody,
@@ -1756,10 +1865,8 @@ export class CosmicMotionApp {
       ghostOrbits.push({ name: pp.name, periodDays: pp.periodDays, dayInOrbit: pp.dayInOrbit, percentComplete: pp.percentComplete });
       if (pp.name === 'Earth') continue;
       const scenePos = eclToThree(pp.helioEcliptic).multiplyScalar(AU_SCENE).add(ghostDrift.clone());
-      const mesh = this.planetMeshes.get(pp.name);
-      if (mesh) mesh.position.copy(scenePos);
-      const glow = this.planetGlows.get(pp.name);
-      if (glow) glow.position.copy(scenePos);
+      const group = this.planetGroups.get(pp.name);
+      if (group) group.position.copy(scenePos);
     }
     this.ui.updateNav(ghostAngles, ghostOrbits, this.currentBody);
 
@@ -2336,6 +2443,15 @@ export class CosmicMotionApp {
 
     // Pole sweep chases around the north pole to show spin direction
     this.northSweep.rotation.y = performance.now() * 0.0018;
+
+    // Animate planet sweeps
+    for (const [name, sweep] of this.planetSweeps) {
+      const planet = PLANETS.find(p => p.name === name);
+      if (!planet) continue;
+      const dir = planet.siderealRotationHours < 0 ? -1 : 1;
+      const speed = 0.003 * dir;
+      sweep.rotation.y = performance.now() * speed;
+    }
 
     // Ghost sweep spins too
     if (this.ghostGroup.visible) {
