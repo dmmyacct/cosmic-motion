@@ -132,6 +132,14 @@ export class CosmicMotionApp {
   private navTime = 0;
   private navDuration = 2.0;
   private currentBody = 'Earth';
+  private hudOverlay!: HTMLElement;
+  private hudCard!: HTMLElement;
+  private hudReticle!: SVGSVGElement;
+  private hudLine!: SVGSVGElement;
+  private hudVisible = true;
+  private hudOpacity = 0;
+  private hudTargetOpacity = 1;
+  private hudLastBody = '';
   private previousBody = 'Earth';
 
   async init(container: HTMLElement): Promise<void> {
@@ -170,6 +178,7 @@ export class CosmicMotionApp {
 
     this.buildGhost();
     this.buildPlanetBeams();
+    this.buildHUD(container);
 
     this.sunLabel = this.makeLabelSprite('☉', '#ffd54f');
     this.sunLabel.scale.set(1.4, 0.7, 1);
@@ -1105,6 +1114,26 @@ export class CosmicMotionApp {
     return q;
   }
 
+  /**
+   * Map a sidereal rotation period (hours, negative=retrograde) to a visual
+   * angular velocity (rad/ms) using a logarithmic scale.
+   * Preserves sign for retrograde, compresses the 588:1 range (Jupiter vs Venus)
+   * into a perceptible ~10:1 visual range.
+   */
+  private logRotationSpeed(periodHours: number): number {
+    const dir = periodHours < 0 ? -1 : 1;
+    const absH = Math.abs(periodHours);
+    const rate = 1 / absH;
+    const logRate = Math.log10(rate);
+    // Jupiter ≈ -1.0, Venus ≈ -3.8
+    const logMin = -3.8;
+    const logMax = -1.0;
+    const t = Math.max(0, Math.min(1, (logRate - logMin) / (logMax - logMin)));
+    const minSpeed = 0.0004;
+    const maxSpeed = 0.005;
+    return dir * (minSpeed + t * (maxSpeed - minSpeed));
+  }
+
   private scaleDistLabel(sprite: THREE.Sprite): void {
     if (!sprite.visible) return;
     const dist = this.camera.position.distanceTo(sprite.position);
@@ -1610,6 +1639,193 @@ export class CosmicMotionApp {
       this.scenePivot.add(travelLabel);
       this.planetTravelLabels.set(planet.name, travelLabel);
     }
+  }
+
+  private buildHUD(container: HTMLElement): void {
+    this.hudOverlay = document.createElement('div');
+    this.hudOverlay.className = 'cm-hud';
+    container.appendChild(this.hudOverlay);
+
+    // Reticle SVG — rotating arc segments around the target
+    this.hudReticle = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.hudReticle.classList.add('cm-hud-reticle');
+    this.hudReticle.setAttribute('viewBox', '-50 -50 100 100');
+    this.hudReticle.innerHTML = `
+      <g class="cm-reticle-spin">
+        <path d="M 0,-40 A 40,40 0 0,1 34.64,-20" class="cm-reticle-arc"/>
+        <path d="M 34.64,20 A 40,40 0 0,1 0,40" class="cm-reticle-arc"/>
+        <path d="M -34.64,-20 A 40,40 0 0,1 0,-40" class="cm-reticle-arc" style="opacity:0.4"/>
+        <path d="M 0,40 A 40,40 0 0,1 -34.64,20" class="cm-reticle-arc" style="opacity:0.4"/>
+      </g>
+      <circle cx="0" cy="0" r="3" class="cm-reticle-dot"/>
+    `;
+    this.hudOverlay.appendChild(this.hudReticle);
+
+    // Leader line SVG — full viewport, draws the elbow line
+    this.hudLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.hudLine.classList.add('cm-hud-line');
+    this.hudLine.innerHTML = `<polyline class="cm-leader-line" points="0,0 0,0 0,0"/>
+      <circle r="3" class="cm-leader-dot cm-leader-dot-body"/>
+      <circle r="3" class="cm-leader-dot cm-leader-dot-card"/>`;
+    this.hudOverlay.appendChild(this.hudLine);
+
+    // Info card
+    this.hudCard = document.createElement('div');
+    this.hudCard.className = 'cm-hud-card';
+    this.hudCard.innerHTML = `
+      <button class="cm-hud-close" title="Close">×</button>
+      <div class="cm-hud-name"></div>
+      <div class="cm-hud-stats"></div>
+    `;
+    this.hudOverlay.appendChild(this.hudCard);
+
+    this.hudCard.querySelector('.cm-hud-close')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hudVisible = false;
+      this.hudTargetOpacity = 0;
+    });
+  }
+
+  private updateHUD(): void {
+    // Get the actual world position from the 3D object
+    const bodyPos = new THREE.Vector3();
+    if (this.currentBody === 'Sun') {
+      this.sunMesh.getWorldPosition(bodyPos);
+    } else if (this.currentBody === 'Earth') {
+      this.earthGroup.getWorldPosition(bodyPos);
+    } else {
+      const grp = this.planetGroups.get(this.currentBody);
+      if (grp) grp.getWorldPosition(bodyPos);
+    }
+    const screenPos = bodyPos.clone().project(this.camera);
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const sx = (screenPos.x * 0.5 + 0.5) * w;
+    const sy = (-screenPos.y * 0.5 + 0.5) * h;
+    const behind = screenPos.z > 1;
+
+    // Fade logic
+    if (this.currentBody !== this.hudLastBody) {
+      this.hudLastBody = this.currentBody;
+      this.hudVisible = true;
+      this.hudTargetOpacity = 1;
+      this.hudOpacity = 0;
+      this.updateHUDContent();
+    }
+
+    const fadeSpeed = 0.08;
+    this.hudOpacity += (this.hudTargetOpacity - this.hudOpacity) * fadeSpeed;
+    const op = behind ? 0 : this.hudOpacity;
+    this.hudOverlay.style.opacity = String(Math.max(0, Math.min(1, op)));
+
+    // Reticle tracks the body — size scales with apparent body size
+    const hudPlanet = PLANETS.find(p => p.name === this.currentBody);
+    const bodyRadius = this.currentBody === 'Sun' ? 4 : (hudPlanet?.sceneRadius ?? 0.5);
+    const camDist = this.camera.position.distanceTo(bodyPos);
+    const angularSize = camDist > 0.01 ? bodyRadius / camDist : 0;
+    const pixelRadius = angularSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
+    const reticleSize = Math.max(60, Math.min(200, pixelRadius * 3 + 40));
+    const halfR = reticleSize / 2;
+    this.hudReticle.style.width = `${reticleSize}px`;
+    this.hudReticle.style.height = `${reticleSize}px`;
+    this.hudReticle.style.transform = `translate(${sx - halfR}px, ${sy - halfR}px)`;
+
+    // Rotate arcs via JS (not CSS animation, for reliability)
+    const spin = this.hudReticle.querySelector('.cm-reticle-spin') as SVGGElement;
+    if (spin) spin.setAttribute('transform', `rotate(${(performance.now() * 0.03) % 360})`);
+
+    // Card position — offset to upper-right of planet, clamped to viewport
+    const cardW = 200;
+    const cardH = 180;
+    const offsetX = halfR + 20;
+    const offsetY = -40;
+    let cx = sx + offsetX;
+    let cy = sy + offsetY;
+    cx = Math.max(8, Math.min(w - cardW - 8, cx));
+    cy = Math.max(8, Math.min(h - cardH - 8, cy));
+    this.hudCard.style.transform = `translate(${cx}px, ${cy}px)`;
+
+    // Leader line: body point → elbow → card edge
+    const lineEl = this.hudLine.querySelector('.cm-leader-line') as SVGPolylineElement;
+    const dotBody = this.hudLine.querySelector('.cm-leader-dot-body') as SVGCircleElement;
+    const dotCard = this.hudLine.querySelector('.cm-leader-dot-card') as SVGCircleElement;
+    this.hudLine.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    this.hudLine.style.width = `${w}px`;
+    this.hudLine.style.height = `${h}px`;
+
+    const cardAnchorX = cx;
+    const cardAnchorY = cy + cardH / 2;
+    const elbowX = cardAnchorX;
+    const elbowY = sy;
+
+    lineEl.setAttribute('points', `${sx},${sy} ${elbowX},${elbowY} ${cardAnchorX},${cardAnchorY}`);
+    dotBody.setAttribute('cx', String(sx));
+    dotBody.setAttribute('cy', String(sy));
+    dotCard.setAttribute('cx', String(cardAnchorX));
+    dotCard.setAttribute('cy', String(cardAnchorY));
+
+    // Color theming
+    const color = this.currentBody === 'Sun' ? '#ffd54f' : (hudPlanet?.color ?? '#ffffff');
+    this.hudReticle.style.setProperty('--hud-color', color);
+    this.hudLine.style.setProperty('--hud-color', color);
+    this.hudCard.style.setProperty('--hud-color', color);
+  }
+
+  private updateHUDContent(): void {
+    const name = this.currentBody;
+    const planet = PLANETS.find(p => p.name === name);
+    const symbol = name === 'Sun' ? '☉' : (planet?.symbol ?? '');
+    const color = name === 'Sun' ? '#ffd54f' : (planet?.color ?? '#ffffff');
+
+    const nameEl = this.hudCard.querySelector('.cm-hud-name')!;
+    nameEl.innerHTML = `<span class="cm-hud-symbol" style="color:${color}">${symbol}</span> ${name}`;
+
+    // Stats get updated each frame via updateHUDStats
+  }
+
+  private updateHUDStats(): void {
+    if (this.hudOpacity < 0.05) return;
+    const statsEl = this.hudCard.querySelector('.cm-hud-stats')!;
+    const name = this.currentBody;
+    const planet = PLANETS.find(p => p.name === name);
+    if (!planet && name !== 'Sun') return;
+
+    if (name === 'Sun') {
+      statsEl.innerHTML = `
+        <div class="cm-hs"><span class="cm-hsl">Galactic speed</span><span class="cm-hsv">230 km/s</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Type</span><span class="cm-hsv">G2V Star</span></div>
+      `;
+      return;
+    }
+
+    const pos = this.getBodyScenePos(name);
+    const sunDist = pos.length() / AU_SCENE;
+    const sunKm = sunDist * 149597870.7;
+    const lightSec = sunKm / 299792.458;
+    const lightStr = lightSec < 60 ? `${lightSec.toFixed(1)}s`
+      : `${Math.floor(lightSec / 60)}m ${Math.round(lightSec % 60).toString().padStart(2, '0')}s`;
+
+    const earthPos = this.earthGroup.position;
+    const earthDistScene = pos.distanceTo(earthPos);
+    const earthDistAU = earthDistScene / AU_SCENE;
+
+    const rotHrs = Math.abs(planet!.siderealRotationHours);
+    const rotDir = planet!.siderealRotationHours < 0 ? '↺' : '↻';
+    const rotStr = rotHrs > 48
+      ? `${(rotHrs / 24).toFixed(1)}d ${rotDir}`
+      : `${rotHrs.toFixed(1)}h ${rotDir}`;
+
+    const isEarth = name === 'Earth';
+
+    statsEl.innerHTML = `
+      <div class="cm-hs"><span class="cm-hsl">Sun dist</span><span class="cm-hsv">${sunDist.toFixed(3)} AU</span></div>
+      ${!isEarth ? `<div class="cm-hs"><span class="cm-hsl">Earth dist</span><span class="cm-hsv">${earthDistAU.toFixed(3)} AU</span></div>` : ''}
+      <div class="cm-hs"><span class="cm-hsl">Light time</span><span class="cm-hsv">${lightStr}</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Orbital speed</span><span class="cm-hsv">${sunDist > 0.01 ? (29.78 * Math.sqrt(2 / sunDist - 1 / planet!.semiMajorAU)).toFixed(1) : '—'} km/s</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Rotation</span><span class="cm-hsv">${rotStr}</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Gravity</span><span class="cm-hsv">${planet!.surfaceGravityMs2.toFixed(1)} m/s²</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Axial tilt</span><span class="cm-hsv">${planet!.axialTiltDeg.toFixed(1)}°</span></div>
+    `;
   }
 
   // ── Update scene from engine data ──
@@ -2441,15 +2657,14 @@ export class CosmicMotionApp {
     );
     this.clouds.quaternion.copy(tiltQuat).multiply(cloudSpinQuat);
 
-    // Pole sweep chases around the north pole to show spin direction
-    this.northSweep.rotation.y = performance.now() * 0.0018;
+    // Pole sweep + planet sweeps: log-mapped rotation speeds
+    const earthSpeed = this.logRotationSpeed(23.9345);
+    this.northSweep.rotation.y = performance.now() * earthSpeed;
 
-    // Animate planet sweeps
     for (const [name, sweep] of this.planetSweeps) {
       const planet = PLANETS.find(p => p.name === name);
       if (!planet) continue;
-      const dir = planet.siderealRotationHours < 0 ? -1 : 1;
-      const speed = 0.003 * dir;
+      const speed = this.logRotationSpeed(planet.siderealRotationHours);
       sweep.rotation.y = performance.now() * speed;
     }
 
@@ -2476,5 +2691,8 @@ export class CosmicMotionApp {
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+
+    this.updateHUD();
+    this.updateHUDStats();
   };
 }

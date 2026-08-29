@@ -614,3 +614,137 @@ canvas { display: block; }
     right: 8px;
   }
 }
+
+/* ── Targeting HUD ── */
+
+.cm-hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.3s ease;
+}
+
+/* Reticle */
+.cm-hud-reticle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  will-change: transform;
+}
+
+.cm-reticle-arc {
+  fill: none;
+  stroke: var(--hud-color, #fff);
+  stroke-width: 1.5;
+  opacity: 0.6;
+  filter: drop-shadow(0 0 3px var(--hud-color, #fff));
+}
+
+.cm-reticle-dot {
+  fill: var(--hud-color, #fff);
+  opacity: 0.5;
+}
+
+/* Leader line */
+.cm-hud-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.cm-leader-line {
+  fill: none;
+  stroke: var(--hud-color, #fff);
+  stroke-width: 1;
+  opacity: 0.25;
+  stroke-dasharray: 4 3;
+}
+
+.cm-leader-dot {
+  fill: var(--hud-color, #fff);
+  opacity: 0.4;
+}
+
+/* Info card */
+.cm-hud-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 190px;
+  padding: 12px 14px 10px;
+  background: rgba(6, 8, 18, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--hud-color, #fff);
+  border-radius: 6px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: auto;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  will-change: transform;
+}
+
+.cm-hud-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  pointer-events: auto;
+}
+.cm-hud-close:hover { color: rgba(255, 255, 255, 0.6); }
+
+.cm-hud-name {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cm-hud-symbol {
+  font-size: 14px;
+  margin-right: 2px;
+}
+
+.cm-hud-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cm-hs {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.cm-hsl {
+  font-family: var(--font);
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.cm-hsv {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  text-align: right;
+}
