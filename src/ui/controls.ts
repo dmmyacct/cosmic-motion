@@ -9,6 +9,11 @@ export interface UICallbacks {
   onToggleFollow: () => void;
   onToggleLocation: () => void;
   onUpFrameChange: (frame: UpFrame) => void;
+  onNavigate: (bodyName: string) => void;
+  onHoverBody: (bodyName: string | null) => void;
+  onToggleOrbits: () => void;
+  onToggleTrajectories: () => void;
+  onToggleAllBeams: () => void;
 }
 
 export interface UIUpdateData {
@@ -27,6 +32,12 @@ export interface UIUpdateData {
   ghostMoonDistKm?: number;
   earthDistTraveled?: number;
   sunDistTraveled?: number;
+  planetAngles?: { name: string; angle: number }[];
+  planetOrbits?: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[];
+  planetDistances?: { name: string; distAU: number; symbol: string; color: string }[];
+  earthOrbitPeriodDays?: number;
+  earthOrbitPercent?: number;
+  currentBody?: string;
 }
 
 const AU_KM = 149597870.7;
@@ -186,9 +197,6 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       </div>
       <div class="cm-body-stats">
         <div class="cm-stat"><span class="cm-stat-label">Galactic speed</span><span class="cm-stat-value cm-sun-galactic-speed">230 km/s</span></div>
-        <div class="cm-stat"><span class="cm-stat-label">Distance</span><span class="cm-stat-value cm-sun-dist">1.000 AU</span></div>
-        <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value cm-sun-dist-km">149.6M km</span></div>
-        <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-sun-light">8m 19s</span></div>
       </div>
 
       <div class="cm-body-section cm-earth-section">
@@ -196,8 +204,13 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
           <span class="cm-body-icon cm-earth-icon">⊕</span> Earth
         </div>
         <div class="cm-body-stats">
-          <div class="cm-stat"><span class="cm-stat-label">Space velocity</span><span class="cm-stat-value cm-earth-total-speed">234.6 km/s</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Sun dist</span><span class="cm-stat-value cm-earth-sun-dist">1.000 AU</span></div>
+          <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value cm-earth-sun-dist-km">149.6M km</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value cm-earth-sun-light">8m 19s</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Orbit</span><span class="cm-stat-value cm-earth-orbit">365.3 days</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Progress</span><span class="cm-stat-value cm-earth-orbit-pct">0.0%</span></div>
           <div class="cm-stat"><span class="cm-stat-label">Orbital speed</span><span class="cm-stat-value cm-earth-orbital-speed">29.78 km/s</span></div>
+          <div class="cm-stat"><span class="cm-stat-label">Space velocity</span><span class="cm-stat-value cm-earth-total-speed">234.6 km/s</span></div>
           <div class="cm-stat"><span class="cm-stat-label">Rotation</span><span class="cm-stat-value cm-earth-rotation-speed">1,674 km/h</span></div>
           <div class="cm-stat"><span class="cm-stat-label">Axial tilt</span><span class="cm-stat-value cm-earth-tilt">23.44°</span></div>
         </div>
@@ -216,6 +229,8 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
       </div>
     </div>
+
+    <div class="cm-planets-section"></div>
   `;
   ui.appendChild(panel);
 
@@ -224,9 +239,11 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const modeDot = panel.querySelector('.cm-live-dot') as HTMLElement;
   const modeLabel = panel.querySelector('.cm-mode-label')!;
   const sunGalSpeed = panel.querySelector('.cm-sun-galactic-speed')!;
-  const sunDist = panel.querySelector('.cm-sun-dist')!;
-  const sunDistKm = panel.querySelector('.cm-sun-dist-km')!;
-  const sunLight = panel.querySelector('.cm-sun-light')!;
+  const earthSunDist = panel.querySelector('.cm-earth-sun-dist')!;
+  const earthSunDistKm = panel.querySelector('.cm-earth-sun-dist-km')!;
+  const earthSunLight = panel.querySelector('.cm-earth-sun-light')!;
+  const earthOrbitEl = panel.querySelector('.cm-earth-orbit')!;
+  const earthOrbitPct = panel.querySelector('.cm-earth-orbit-pct')!;
   const earthTotalSpeed = panel.querySelector('.cm-earth-total-speed')!;
   const earthOrbitalSpeed = panel.querySelector('.cm-earth-orbital-speed')!;
   const earthRotSpeed = panel.querySelector('.cm-earth-rotation-speed')!;
@@ -235,6 +252,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const moonIllum = panel.querySelector('.cm-moon-illum')!;
   const moonDist = panel.querySelector('.cm-moon-dist')!;
   const moonLight = panel.querySelector('.cm-moon-light')!;
+  const planetsSection = panel.querySelector('.cm-planets-section') as HTMLElement;
 
   // ── Bottom: time controls ──
   const timePanel = document.createElement('div');
@@ -257,6 +275,9 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-speed-btn" title="Playback speed">1 hr/s</button>
       <button class="cm-follow-btn" title="Follow ghost">Follow</button>
       <button class="cm-loc-btn active" title="My location">📍</button>
+      <button class="cm-orbits-btn active" title="Toggle orbit rings">◯</button>
+      <button class="cm-traj-btn active" title="Toggle trajectories">∿</button>
+      <button class="cm-beams-btn" title="Show all planet beams">☀</button>
       <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
@@ -272,6 +293,9 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const speedBtn = timePanel.querySelector('.cm-speed-btn') as HTMLButtonElement;
   const followBtn = timePanel.querySelector('.cm-follow-btn') as HTMLButtonElement;
   const locBtn = timePanel.querySelector('.cm-loc-btn') as HTMLButtonElement;
+  const orbitsBtn = timePanel.querySelector('.cm-orbits-btn') as HTMLButtonElement;
+  const trajBtn = timePanel.querySelector('.cm-traj-btn') as HTMLButtonElement;
+  const beamsBtn = timePanel.querySelector('.cm-beams-btn') as HTMLButtonElement;
   const upBtn = timePanel.querySelector('.cm-up-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
@@ -350,6 +374,21 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     callbacks.onToggleLocation();
   });
 
+  orbitsBtn.addEventListener('click', () => {
+    orbitsBtn.classList.toggle('active');
+    callbacks.onToggleOrbits();
+  });
+
+  trajBtn.addEventListener('click', () => {
+    trajBtn.classList.toggle('active');
+    callbacks.onToggleTrajectories();
+  });
+
+  beamsBtn.addEventListener('click', () => {
+    beamsBtn.classList.toggle('active');
+    callbacks.onToggleAllBeams();
+  });
+
   const UP_FRAMES: UpFrame[] = ['ecliptic', 'equatorial', 'galactic'];
   const UP_LABELS: Record<UpFrame, string> = {
     ecliptic: '↑ Ecl',
@@ -385,8 +424,195 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   // Scale note
   const scaleNote = document.createElement('div');
   scaleNote.className = 'cm-scale-note';
-  scaleNote.textContent = '±100 yr range · VSOP87/ELP2000 ephemeris · Galactic drift 8× compressed';
+  scaleNote.textContent = 'Distances proportional (1 AU = 50u) · Planet sizes proportional · Sun/Moon-dist exaggerated · ±100 yr ephemeris';
   ui.appendChild(scaleNote);
+
+  // ── Solar System Navigation Widget ──
+  const NAV_PLANETS = [
+    { name: 'Mercury', symbol: '\u263F', color: '#b5a7a7' },
+    { name: 'Venus',   symbol: '\u2640', color: '#e8cda0' },
+    { name: 'Earth',   symbol: '\u2295', color: '#4fc3f7' },
+    { name: 'Mars',    symbol: '\u2642', color: '#e57373' },
+    { name: 'Jupiter', symbol: '\u2643', color: '#d4a574' },
+    { name: 'Saturn',  symbol: '\u2644', color: '#f0d59e' },
+    { name: 'Uranus',  symbol: '\u26E2', color: '#80deea' },
+    { name: 'Neptune', symbol: '\u2646', color: '#5c6bc0' },
+  ];
+  // sqrt-proportional ring radii based on real semi-major axes in AU
+  const AU_VALUES = [0.387, 0.723, 1.0, 1.524, 5.203, 9.537, 19.189, 30.070];
+  const AU_MAX = 30.070;
+  const R_MIN = 8, R_MAX = 86;
+  const RING_RADII = AU_VALUES.map(au =>
+    R_MIN + (R_MAX - R_MIN) * Math.sqrt(au / AU_MAX));
+  const svgNS = 'http://www.w3.org/2000/svg';
+  let currentOrbitData: Map<string, { periodDays: number; dayInOrbit: number; percentComplete: number }> = new Map();
+
+  const navWrapper = document.createElement('div');
+  navWrapper.className = 'cm-nav-widget';
+  ui.appendChild(navWrapper);
+
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '-95 -95 190 190');
+  svg.setAttribute('class', 'cm-nav-svg');
+  navWrapper.appendChild(svg);
+
+  const defs = document.createElementNS(svgNS, 'defs');
+  svg.appendChild(defs);
+
+  const planetDots: Map<string, SVGCircleElement> = new Map();
+  const orbitGroups: Map<string, SVGGElement> = new Map();
+  let activeHighlight: string | null = null;
+
+  // Tooltip element (HTML, below SVG)
+  const tooltip = document.createElement('div');
+  tooltip.className = 'cm-nav-tooltip';
+  tooltip.innerHTML = '<div class="cm-nav-tooltip-name"></div><div class="cm-nav-tooltip-info"></div>';
+  tooltip.style.opacity = '0';
+  navWrapper.appendChild(tooltip);
+  const tooltipName = tooltip.querySelector('.cm-nav-tooltip-name')!;
+  const tooltipInfo = tooltip.querySelector('.cm-nav-tooltip-info')!;
+
+  function showTooltip(name: string) {
+    tooltipName.textContent = name;
+    const data = currentOrbitData.get(name);
+    if (data) {
+      const periodStr = data.periodDays >= 365
+        ? `${(data.periodDays / 365.25).toFixed(1)} yr orbit`
+        : `${Math.round(data.periodDays)} day orbit`;
+      tooltipInfo.textContent = `${periodStr}  ·  Day ${Math.round(data.dayInOrbit).toLocaleString()}  ·  ${data.percentComplete.toFixed(1)}%`;
+    } else {
+      tooltipInfo.textContent = '';
+    }
+    tooltip.style.opacity = '1';
+  }
+
+  function hideTooltip() {
+    tooltip.style.opacity = '0';
+  }
+
+  // Sun at center
+  const sunCircle = document.createElementNS(svgNS, 'circle');
+  sunCircle.setAttribute('cx', '0');
+  sunCircle.setAttribute('cy', '0');
+  sunCircle.setAttribute('r', '4');
+  sunCircle.setAttribute('class', 'cm-nav-sun');
+  sunCircle.style.cursor = 'pointer';
+  sunCircle.addEventListener('click', () => callbacks.onNavigate('Sun'));
+  sunCircle.addEventListener('mouseenter', () => {
+    tooltipName.textContent = 'Sun';
+    tooltipInfo.textContent = '';
+    tooltip.style.opacity = '1';
+    callbacks.onHoverBody('Sun');
+  });
+  sunCircle.addEventListener('mouseleave', () => {
+    hideTooltip();
+    callbacks.onHoverBody(null);
+  });
+  svg.appendChild(sunCircle);
+
+  // Build orbit rings and planet dots
+  for (let i = 0; i < NAV_PLANETS.length; i++) {
+    const planet = NAV_PLANETS[i];
+    const r = RING_RADII[i];
+
+    const group = document.createElementNS(svgNS, 'g');
+    group.setAttribute('class', 'cm-nav-orbit-group');
+    group.style.cursor = 'pointer';
+    orbitGroups.set(planet.name, group);
+
+    // Hover hitarea (wider invisible ring)
+    const hitRing = document.createElementNS(svgNS, 'circle');
+    hitRing.setAttribute('cx', '0');
+    hitRing.setAttribute('cy', '0');
+    hitRing.setAttribute('r', String(r));
+    hitRing.setAttribute('class', 'cm-nav-hit-ring');
+    group.appendChild(hitRing);
+
+    // Visible orbit ring
+    const ring = document.createElementNS(svgNS, 'circle');
+    ring.setAttribute('cx', '0');
+    ring.setAttribute('cy', '0');
+    ring.setAttribute('r', String(r));
+    ring.setAttribute('class', 'cm-nav-orbit-ring');
+    group.appendChild(ring);
+
+    // Curved text path for planet name
+    const textPathId = `nav-text-path-${i}`;
+    const textR = r + 1.5;
+    const textPath = document.createElementNS(svgNS, 'path');
+    textPath.setAttribute('id', textPathId);
+    textPath.setAttribute('d',
+      `M ${-textR},0 A ${textR},${textR} 0 0 1 ${textR},0`);
+    textPath.setAttribute('fill', 'none');
+    defs.appendChild(textPath);
+
+    const labelText = document.createElementNS(svgNS, 'text');
+    labelText.setAttribute('class', 'cm-nav-curved-label');
+    const tp = document.createElementNS(svgNS, 'textPath');
+    tp.setAttribute('href', `#${textPathId}`);
+    tp.setAttribute('startOffset', '50%');
+    tp.setAttribute('text-anchor', 'middle');
+    tp.textContent = planet.name;
+    labelText.appendChild(tp);
+    group.appendChild(labelText);
+
+    // Planet dot
+    const dot = document.createElementNS(svgNS, 'circle');
+    const dotR = i >= 4 ? 3 : 2;
+    dot.setAttribute('r', String(dotR));
+    dot.setAttribute('class', 'cm-nav-planet-dot');
+    dot.setAttribute('fill', planet.color);
+    dot.setAttribute('cx', String(r));
+    dot.setAttribute('cy', '0');
+    group.appendChild(dot);
+    planetDots.set(planet.name, dot);
+
+    // Interaction
+    group.addEventListener('click', () => callbacks.onNavigate(planet.name));
+    group.addEventListener('mouseenter', () => {
+      group.classList.add('cm-nav-hover');
+      showTooltip(planet.name);
+      callbacks.onHoverBody(planet.name);
+    });
+    group.addEventListener('mouseleave', () => {
+      group.classList.remove('cm-nav-hover');
+      hideTooltip();
+      callbacks.onHoverBody(null);
+    });
+
+    svg.appendChild(group);
+  }
+
+  function updateNavWidget(
+    angles?: { name: string; angle: number }[],
+    orbits?: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[],
+    current?: string,
+  ) {
+    if (angles) {
+      for (const { name, angle } of angles) {
+        const dot = planetDots.get(name);
+        if (!dot) continue;
+        const idx = NAV_PLANETS.findIndex(p => p.name === name);
+        if (idx < 0) continue;
+        const r = RING_RADII[idx];
+        dot.setAttribute('cx', String(r * Math.cos(angle)));
+        dot.setAttribute('cy', String(-r * Math.sin(angle)));
+      }
+    }
+    if (orbits) {
+      for (const o of orbits) {
+        currentOrbitData.set(o.name, { periodDays: o.periodDays, dayInOrbit: o.dayInOrbit, percentComplete: o.percentComplete });
+      }
+    }
+    if (current && current !== activeHighlight) {
+      if (activeHighlight) {
+        orbitGroups.get(activeHighlight)?.classList.remove('cm-nav-active');
+      }
+      activeHighlight = current;
+      orbitGroups.get(current)?.classList.add('cm-nav-active');
+      sunCircle.classList.toggle('cm-nav-sun-active', current === 'Sun');
+    }
+  }
 
   return {
     update(data: UIUpdateData) {
@@ -397,12 +623,14 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
       // Sun
       sunGalSpeed.textContent = `${data.solarGalacticSpeedKmS.toFixed(0)} km/s`;
-      sunDist.textContent = `${data.sunDistAU.toFixed(4)} AU`;
       const sunKm = data.sunDistAU * AU_KM;
-      sunDistKm.textContent = fmtDist(sunKm);
-      sunLight.textContent = fmtLightTime(sunKm);
 
       // Earth
+      earthSunDist.textContent = `${data.sunDistAU.toFixed(4)} AU`;
+      earthSunDistKm.textContent = fmtDist(sunKm);
+      earthSunLight.textContent = fmtLightTime(sunKm);
+      if (data.earthOrbitPeriodDays != null) earthOrbitEl.textContent = `${data.earthOrbitPeriodDays.toFixed(1)} days`;
+      if (data.earthOrbitPercent != null) earthOrbitPct.textContent = `${data.earthOrbitPercent.toFixed(1)}%`;
       earthTotalSpeed.textContent = `${data.speedKmS.toFixed(2)} km/s`;
       earthOrbitalSpeed.textContent = `${data.orbitalSpeedKmS.toFixed(2)} km/s`;
       const rotSpeedKmH = EARTH_CIRCUMFERENCE_KM / SIDEREAL_DAY_H;
@@ -426,6 +654,47 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       } else {
         travelDistEl.style.display = 'none';
       }
+
+      // Planet sections
+      if (data.planetDistances && data.planetOrbits) {
+        const focused = data.currentBody;
+        let html = '';
+        for (const pd of data.planetDistances) {
+          if (pd.name === 'Earth') continue;
+          const orbit = data.planetOrbits?.find(o => o.name === pd.name);
+          const distKm = pd.distAU * AU_KM;
+          const isFocused = focused === pd.name;
+          const periodStr = orbit
+            ? (orbit.periodDays > 600
+              ? `${(orbit.periodDays / 365.25).toFixed(2)} yrs`
+              : `${orbit.periodDays.toFixed(1)} days`)
+            : '';
+          html += `<div class="cm-body-section cm-planet-row${isFocused ? ' cm-focused' : ''}">
+            <div class="cm-body-header" style="color: ${pd.color}">
+              <span class="cm-body-icon">${pd.symbol}</span> ${pd.name}
+            </div>
+            <div class="cm-body-stats">
+              <div class="cm-stat"><span class="cm-stat-label">Sun dist</span><span class="cm-stat-value">${pd.distAU.toFixed(3)} AU</span></div>
+              <div class="cm-stat"><span class="cm-stat-label"></span><span class="cm-stat-value">${fmtDist(distKm)}</span></div>
+              <div class="cm-stat"><span class="cm-stat-label">Light time</span><span class="cm-stat-value">${fmtLightTime(distKm)}</span></div>`;
+          if (orbit) {
+            html += `<div class="cm-stat"><span class="cm-stat-label">Orbit</span><span class="cm-stat-value">${periodStr}</span></div>
+              <div class="cm-stat"><span class="cm-stat-label">Progress</span><span class="cm-stat-value">${orbit.percentComplete.toFixed(1)}%</span></div>`;
+          }
+          html += `</div></div>`;
+        }
+        planetsSection.innerHTML = html;
+      }
+
+      updateNavWidget(data.planetAngles, data.planetOrbits, data.currentBody);
+    },
+
+    updateNav(
+      angles: { name: string; angle: number }[],
+      orbits: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[],
+      current: string,
+    ) {
+      updateNavWidget(angles, orbits, current);
     },
 
     tickPlayback() {

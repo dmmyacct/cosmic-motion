@@ -40,10 +40,22 @@ canvas { display: block; }
   border-radius: 10px;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  pointer-events: none;
+  pointer-events: auto;
   user-select: none;
   min-width: 220px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
 }
+
+.cm-panel::-webkit-scrollbar { width: 4px; }
+.cm-panel::-webkit-scrollbar-track { background: transparent; }
+.cm-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+.cm-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
 
 .cm-panel-mode {
   display: flex;
@@ -179,6 +191,24 @@ canvas { display: block; }
   letter-spacing: -0.2px;
   white-space: nowrap;
   text-align: right;
+}
+
+/* Planet rows */
+.cm-planets-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cm-planet-row {
+  padding: 4px 6px;
+  border-radius: 5px;
+  margin-bottom: 2px;
+  transition: background 0.2s ease;
+}
+
+.cm-planet-row.cm-focused {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 /* ── Bottom: time slider ── */
@@ -398,6 +428,138 @@ canvas { display: block; }
   box-shadow: 0 0 30px rgba(0, 229, 255, 0.1);
 }
 
+/* ── Solar System Navigation Widget ── */
+
+.cm-nav-widget {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 220px;
+  height: 220px;
+  background: transparent;
+  pointer-events: auto;
+  user-select: none;
+  overflow: visible;
+}
+
+.cm-nav-svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Sun center */
+.cm-nav-sun {
+  fill: #ffd54f;
+  filter: drop-shadow(0 0 3px rgba(255, 213, 79, 0.5));
+  transition: all 0.3s ease;
+}
+
+.cm-nav-sun:hover {
+  fill: #ffe082;
+  filter: drop-shadow(0 0 6px rgba(255, 213, 79, 0.8));
+}
+
+.cm-nav-sun-active {
+  filter: drop-shadow(0 0 6px rgba(255, 213, 79, 0.8));
+  stroke: rgba(255, 213, 79, 0.4);
+  stroke-width: 0.5;
+}
+
+/* Hit area (invisible wider stroke for easier hovering) */
+.cm-nav-hit-ring {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 8;
+  pointer-events: stroke;
+}
+
+/* Orbit rings */
+.cm-nav-orbit-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 0.3;
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+/* Planet dots */
+.cm-nav-planet-dot {
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 0 2px currentColor);
+  pointer-events: none;
+}
+
+/* Curved labels */
+.cm-nav-curved-label {
+  font-size: 3.5px;
+  fill: rgba(255, 255, 255, 0.0);
+  font-family: var(--font);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: fill 0.3s ease;
+  pointer-events: none;
+}
+
+/* Hover state */
+.cm-nav-orbit-group.cm-nav-hover .cm-nav-orbit-ring {
+  stroke: rgba(0, 229, 255, 0.45);
+  stroke-width: 0.8;
+}
+
+.cm-nav-orbit-group.cm-nav-hover .cm-nav-planet-dot {
+  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
+  r: 4;
+}
+
+.cm-nav-orbit-group.cm-nav-hover .cm-nav-curved-label {
+  fill: rgba(255, 255, 255, 0.6);
+}
+
+/* Active (current body) */
+.cm-nav-orbit-group.cm-nav-active .cm-nav-orbit-ring {
+  stroke: rgba(0, 229, 255, 0.15);
+  stroke-width: 0.5;
+}
+
+.cm-nav-orbit-group.cm-nav-active .cm-nav-planet-dot {
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.cm-nav-orbit-group.cm-nav-active .cm-nav-curved-label {
+  fill: rgba(255, 255, 255, 0.3);
+}
+
+/* Hover tooltip */
+.cm-nav-tooltip {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+  z-index: 5;
+}
+
+.cm-nav-tooltip-name {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
+}
+
+.cm-nav-tooltip-info {
+  font-size: 8.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.2px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 1px;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
 @media (max-width: 600px) {
   .cm-panel {
     top: 8px;
@@ -410,4 +572,10 @@ canvas { display: block; }
   .cm-body-header { font-size: 9px; }
   .cm-time-panel { bottom: 14px; }
   .cm-hint { bottom: 75px; font-size: 9px; }
+  .cm-nav-widget {
+    width: 140px;
+    height: 140px;
+    top: 8px;
+    right: 8px;
+  }
 }
