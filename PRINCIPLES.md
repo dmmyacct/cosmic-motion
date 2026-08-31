@@ -36,25 +36,62 @@ There are no separate trajectory scales, no per-feature multipliers.
 If something needs to appear larger, use mesh/sprite scale — never a
 different coordinate scale.
 
-## 4. Body Sizes (Tier 2 Scale)
+## 4. Body Sizes — Perspective-Faithful Scaling
 
-All planet radii are proportional to each other:
+Bodies render at the angular size a human observer would perceive from the
+camera's position. Mesh geometries use fixed "base radii" (for texture detail),
+and a per-frame scale factor adjusts each body's apparent size.
+
+### True proportional radii
+
+Every body has a true scene radius derived from real physics:
 
 ```
-sceneRadius = (radiusKm / 6371) * 0.5
+trueSceneRadius = radiusKm / AU_KM * AU_SCENE
 ```
 
-This makes Earth = 0.5 scene units, Jupiter = 5.49, Mercury = 0.19, etc.
-The exaggeration vs orbital distances (~235x) is standard planetarium practice
-and is required for bodies to be visible at interplanetary zoom levels.
+| Body    | True scene radius |
+|---------|-------------------|
+| Sun     | 0.2326            |
+| Jupiter | 0.02337           |
+| Saturn  | 0.01946           |
+| Earth   | 0.00213           |
+| Moon    | 0.000581          |
+
+### Per-frame scaling
+
+Each frame, for every body:
+1. Compute camera distance to the body.
+2. Compute true angular radius: `trueR / cameraDist`.
+3. Enforce a minimum angular size (MIN_BODY_PX = 3 pixels) so distant bodies
+   remain visible.
+4. Set `mesh.scale` = `effectiveRadius / meshBaseRadius`.
+
+Close up, bodies show at their real proportional size — the Sun is massive,
+Jupiter dwarfs Earth. Far away, bodies shrink to minimum-size dots on their
+orbital paths.
+
+### Mesh base radii (geometry construction sizes)
+
+These are the radii used when creating SphereGeometry. They don't represent
+the displayed size; the per-frame scale factor does.
+
+- Sun: 4 (allows procedural noise detail)
+- Earth: 0.5 (allows texture detail)
+- Moon: 0.135 (EARTH_R × 0.27)
+- Planets: `(radiusKm / 6371) * 0.5` (proportional, for texture detail)
+
+### Camera adaptation
+
+- `controls.minDistance` adapts to the focused body's true radius (×2.5),
+  allowing close approach to small bodies.
+- `camera.near` adapts to prevent clipping when zoomed in.
 
 ### Documented Exceptions
 
-- **Sun radius**: Capped at ~4-5 scene units (true proportional would be 54.7,
-  engulfing Mercury/Venus/Earth orbits). Corona and glow sprites extend
-  visual presence.
 - **Moon orbital distance**: Fixed at 2.5 scene units from Earth (true
-  proportional = 0.13, inside Earth's mesh). Moon body size IS proportional.
+  proportional = 0.13). Keeps the Earth–Moon pair visually separable at
+  moderate zoom. Moon body size IS perspective-faithful.
 
 ## 5. Ephemeris Sources
 

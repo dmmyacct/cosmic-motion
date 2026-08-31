@@ -687,6 +687,16 @@ canvas { display: block; }
   will-change: transform;
 }
 
+.cm-hud-card-moon {
+  width: 175px;
+  padding: 10px 12px 8px;
+}
+.cm-hud-card-moon .cm-hud-name {
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 5px;
+}
+
 .cm-hud-close {
   position: absolute;
   top: 4px;

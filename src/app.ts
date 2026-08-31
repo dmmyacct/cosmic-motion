@@ -26,6 +26,19 @@ const MOON_DIST = 2.5;
 // Compress 8× so the spiral is visible (pitch:radius ≈ 5.75:1).
 const GALACTIC_VIS_COMPRESSION = 8;
 
+// ── Perspective-faithful scaling ──
+// True proportional radii: sceneR = radiusKm / AU_KM * AU_SCENE
+// Bodies render at their real angular size from the camera's position,
+// with a pixel-floor so distant bodies remain visible.
+const AU_KM_VAL = 149597870.7;
+const SUN_RADIUS_KM = 696000;
+const MOON_RADIUS_KM = 1737.4;
+const SUN_TRUE_R = SUN_RADIUS_KM / AU_KM_VAL * AU_SCENE;   // ~0.2326
+const MOON_TRUE_R = MOON_RADIUS_KM / AU_KM_VAL * AU_SCENE;  // ~0.000581
+const SUN_MESH_R = 4;
+const MOON_MESH_R = EARTH_R * 0.27;
+const MIN_BODY_PX = 3;
+
 function eclToThree(v: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(v[0], v[2], -v[1]);
 }
@@ -140,7 +153,15 @@ export class CosmicMotionApp {
   private hudOpacity = 0;
   private hudTargetOpacity = 1;
   private hudLastBody = '';
+  private moonHudCard!: HTMLElement;
+  private moonHudReticle!: SVGSVGElement;
+  private moonHudLine!: SVGSVGElement;
+  private moonHudVisible = true;
+  private moonHudOpacity = 0;
+  private moonAxisLine!: THREE.Line;
+  private moonSweep!: THREE.Group;
   private previousBody = 'Earth';
+  private _earthScale = 1;
 
   async init(container: HTMLElement): Promise<void> {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -180,6 +201,22 @@ export class CosmicMotionApp {
     this.buildPlanetBeams();
     this.buildHUD(container);
 
+    // Moon click to toggle its HUD
+    this.renderer.domElement.addEventListener('click', (e) => {
+      if (this.currentBody !== 'Earth') return;
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, this.camera);
+      const hits = raycaster.intersectObject(this.moonMesh, false);
+      if (hits.length > 0) {
+        this.moonHudVisible = !this.moonHudVisible;
+      }
+    });
+
     this.sunLabel = this.makeLabelSprite('☉', '#ffd54f');
     this.sunLabel.scale.set(1.4, 0.7, 1);
     this.scenePivot.add(this.sunLabel);
@@ -200,6 +237,7 @@ export class CosmicMotionApp {
 
     this.moonDistLabel = this.makeDistLabel();
     this.moonDistLabel.scale.set(5, 0.65, 1);
+    this.moonDistLabel.visible = false;
     this.earthGroup.add(this.moonDistLabel);
 
     this.ui = createUI(container, {
@@ -730,6 +768,33 @@ export class CosmicMotionApp {
     this.moonMesh = new THREE.Mesh(geo, moonMat);
     this.earthGroup.add(this.moonMesh);
 
+    // Moon axis tilt line — IAU pole: RA=269.9949°, Dec=66.5392°
+    const moonPoleEcl = poleToEclipticAxis(269.9949, 66.5392);
+    const moonPoleDir = eclToThree(moonPoleEcl).normalize();
+    const moonR = EARTH_R * 0.27;
+    const moonAxisLen = moonR * 2.5;
+    const moonAxisGeo = new THREE.BufferGeometry().setFromPoints([
+      moonPoleDir.clone().multiplyScalar(-moonAxisLen),
+      moonPoleDir.clone().multiplyScalar(moonAxisLen),
+    ]);
+    const moonAxisMat = new THREE.LineDashedMaterial({
+      color: 0x999999, transparent: true, opacity: 0.3,
+      dashSize: moonR * 0.25, gapSize: moonR * 0.12,
+    });
+    this.moonAxisLine = new THREE.Line(moonAxisGeo, moonAxisMat);
+    this.moonAxisLine.computeLineDistances();
+    this.earthGroup.add(this.moonAxisLine);
+
+    // Moon rotation sweep
+    this.moonSweep = this.createPlanetSweep(moonR * 0.7, '#999999', false);
+    this.moonSweep.position.copy(moonPoleDir.clone().multiplyScalar(moonAxisLen));
+    const moonTiltQuat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), moonPoleDir,
+    );
+    this.moonSweep.quaternion.copy(moonTiltQuat);
+    this.moonMesh.quaternion.copy(moonTiltQuat);
+    this.earthGroup.add(this.moonSweep);
+
     // Moon orbital path — computed from actual lunar ephemeris over one sidereal month
     this.moonOrbitLine = new THREE.Line(
       new THREE.BufferGeometry(),
@@ -859,12 +924,11 @@ export class CosmicMotionApp {
     const sunDir = distToSun > 0.01 ? toSun.clone().normalize() : new THREE.Vector3(1, 0, 0);
     const up = new THREE.Vector3(0, 1, 0);
 
-    const planet = PLANETS.find(p => p.name === bodyName);
-    const bodyRadius = bodyName === 'Sun' ? 4 : (planet?.sceneRadius ?? 0.5);
+    const trueR = this.bodyTrueRadius(bodyName);
 
     const viewDist = bodyName === 'Sun'
-      ? Math.max(20, bodyRadius * 8)
-      : Math.max(bodyRadius * 6, Math.min(distToSun * 0.15, bodyRadius * 25));
+      ? Math.max(trueR * 8, trueR * 5)
+      : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
 
     // Camera on the anti-Sun side, elevated — Sun is visible behind the target body
     this.navEndCamPos.copy(targetPos)
@@ -904,6 +968,143 @@ export class CosmicMotionApp {
     return mesh ? mesh.getWorldPosition(new THREE.Vector3()) : this.earthGroup.position.clone();
   }
 
+  private bodyTrueRadius(name: string): number {
+    if (name === 'Sun') return SUN_TRUE_R;
+    if (name === 'Moon') return MOON_TRUE_R;
+    const planet = PLANETS.find(p => p.name === name);
+    return planet ? planet.radiusKm / AU_KM_VAL * AU_SCENE : SUN_TRUE_R;
+  }
+
+  private bodyMeshRadius(name: string): number {
+    if (name === 'Sun') return SUN_MESH_R;
+    if (name === 'Moon') return MOON_MESH_R;
+    const planet = PLANETS.find(p => p.name === name);
+    return planet?.sceneRadius ?? EARTH_R;
+  }
+
+  private effectiveRadius(trueR: number, distToCamera: number): number {
+    if (distToCamera < 0.0001) return trueR;
+    const h = this.renderer.domElement.clientHeight;
+    const halfFovTan = Math.tan(this.camera.fov * Math.PI / 360);
+    const minAngular = MIN_BODY_PX / (h * 0.5) * halfFovTan;
+    const trueAngular = trueR / distToCamera;
+    return Math.max(trueAngular, minAngular) * distToCamera;
+  }
+
+  private updatePerspectiveScaling(): void {
+    const camPos = this.camera.position;
+    const _wp = new THREE.Vector3();
+
+    // ── Sun ──
+    this.sunMesh.getWorldPosition(_wp);
+    const sunDist = camPos.distanceTo(_wp);
+    const sunEff = this.effectiveRadius(SUN_TRUE_R, sunDist);
+    const sunSf = sunEff / SUN_MESH_R;
+    this.sunMesh.scale.setScalar(sunSf);
+    this.sunCorona.scale.setScalar(sunSf);
+    this.sunSprite.scale.set(22 * sunSf, 22 * sunSf, 1);
+    this.sunGlow.scale.set(60 * sunSf, 60 * sunSf, 1);
+    this.sunLabel.position.set(0, sunEff + Math.max(0.5, sunEff * 0.6), 0);
+
+    const sunGlowFade = Math.min(1, sunDist / (SUN_TRUE_R * 10));
+    (this.sunSprite.material as THREE.SpriteMaterial).opacity = sunGlowFade;
+    (this.sunGlow.material as THREE.SpriteMaterial).opacity = sunGlowFade * 0.8;
+
+    // ── Earth ──
+    this.earthGroup.getWorldPosition(_wp);
+    const earthTrueR = PLANETS.find(p => p.name === 'Earth')!.radiusKm / AU_KM_VAL * AU_SCENE;
+    const earthDist = camPos.distanceTo(_wp);
+    const earthEff = this.effectiveRadius(earthTrueR, earthDist);
+    const earthSf = earthEff / EARTH_R;
+    this._earthScale = earthSf;
+    this.earth.scale.setScalar(earthSf);
+    this.clouds.scale.setScalar(earthSf);
+    this.atmosphere.scale.setScalar(earthSf);
+    this.axisLine.scale.setScalar(earthSf);
+    this.poleSweepGroup.scale.setScalar(earthSf);
+
+    this.locMarker.scale.setScalar(earthSf);
+    this.arrowHelper.scale.setScalar(earthSf);
+
+    // ── Moon ──
+    this.moonMesh.getWorldPosition(_wp);
+    const moonDist = camPos.distanceTo(_wp);
+    const moonEff = this.effectiveRadius(MOON_TRUE_R, moonDist);
+    const moonSf = moonEff / MOON_MESH_R;
+    this.moonMesh.scale.setScalar(moonSf);
+    this.moonAxisLine.scale.setScalar(moonSf);
+    this.moonSweep.scale.setScalar(moonSf);
+
+    // ── Other planets ──
+    for (const planet of PLANETS) {
+      if (planet.name === 'Earth') continue;
+      const mesh = this.planetMeshes.get(planet.name);
+      const group = this.planetGroups.get(planet.name);
+      if (!mesh || !group) continue;
+
+      group.getWorldPosition(_wp);
+      const dist = camPos.distanceTo(_wp);
+      const trueR = planet.radiusKm / AU_KM_VAL * AU_SCENE;
+      const eff = this.effectiveRadius(trueR, dist);
+      const sf = eff / planet.sceneRadius;
+      mesh.scale.setScalar(sf);
+
+      const axisLine = this.planetAxisLines.get(planet.name);
+      if (axisLine) axisLine.scale.setScalar(sf);
+
+      const sweep = this.planetSweeps.get(planet.name);
+      if (sweep) {
+        sweep.scale.setScalar(sf);
+        const poleEcl = poleToEclipticAxis(planet.poleRA, planet.poleDec);
+        const poleDir = eclToThree(poleEcl).normalize();
+        sweep.position.copy(poleDir.clone().multiplyScalar(planet.sceneRadius * 2.5 * sf));
+      }
+
+      const glow = this.planetGlows.get(planet.name);
+      if (glow) {
+        const glowSize = eff + Math.sqrt(Math.max(eff, 0.001)) * 4;
+        const hoverBoost = this.hoveredBody === planet.name ? 2.5 : 1;
+        glow.scale.set(glowSize * hoverBoost, glowSize * hoverBoost, 1);
+      }
+    }
+
+    // ── Ghost bodies ──
+    if (this.ghostGroup.visible) {
+      this.ghostEarth.getWorldPosition(_wp);
+      const geDist = camPos.distanceTo(_wp);
+      const geEff = this.effectiveRadius(earthTrueR, geDist);
+      const geSf = geEff / EARTH_R;
+      this.ghostEarth.scale.setScalar(geSf);
+      this.ghostClouds.scale.setScalar(geSf);
+      this.ghostAtmo.scale.setScalar(geSf);
+      this.ghostAxisLine.scale.setScalar(geSf);
+      this.ghostSweep.scale.setScalar(geSf);
+
+      this.ghostMoon.getWorldPosition(_wp);
+      const gmDist = camPos.distanceTo(_wp);
+      const gmEff = this.effectiveRadius(MOON_TRUE_R, gmDist);
+      this.ghostMoon.scale.setScalar(gmEff / MOON_MESH_R);
+
+      this.ghostSunSprite.getWorldPosition(_wp);
+      const gsDist = camPos.distanceTo(_wp);
+      const gsEff = this.effectiveRadius(SUN_TRUE_R, gsDist);
+      const gsSf = gsEff / SUN_MESH_R;
+      this.ghostSunSprite.scale.set(10 * gsSf, 10 * gsSf, 1);
+      this.ghostSunGlow.scale.set(35 * gsSf, 35 * gsSf, 1);
+      this.ghostSunLabel.position.copy(this.ghostSunWorldPos).add(
+        new THREE.Vector3(0, gsEff + Math.max(0.3, gsEff * 0.6), 0),
+      );
+    }
+
+    // ── Dynamic near plane + min orbit distance ──
+    const focusedPos = this.getBodyScenePos(this.currentBody);
+    const focusDist = camPos.distanceTo(focusedPos);
+    const focusTrueR = this.bodyTrueRadius(this.currentBody);
+    this.controls.minDistance = Math.max(focusTrueR * 2.5, 0.0005);
+    this.camera.near = Math.min(0.1, Math.max(0.0001, focusDist * 0.05));
+    this.camera.updateProjectionMatrix();
+  }
+
   private buildLocationMarker(): void {
     this.locMarker = new THREE.Group();
 
@@ -941,7 +1142,7 @@ export class CosmicMotionApp {
       cosLat * Math.cos(lonRad),
       Math.sin(latRad),
       -cosLat * Math.sin(lonRad),
-    ).multiplyScalar(EARTH_R * 1.005);
+    ).multiplyScalar(EARTH_R * this._earthScale * 1.005);
 
     const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
@@ -1684,6 +1885,42 @@ export class CosmicMotionApp {
       this.hudVisible = false;
       this.hudTargetOpacity = 0;
     });
+
+    // Moon HUD — secondary target
+    this.moonHudReticle = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.moonHudReticle.classList.add('cm-hud-reticle');
+    this.moonHudReticle.setAttribute('viewBox', '-50 -50 100 100');
+    this.moonHudReticle.innerHTML = `
+      <g class="cm-reticle-spin">
+        <path d="M 0,-40 A 40,40 0 0,1 34.64,-20" class="cm-reticle-arc"/>
+        <path d="M 34.64,20 A 40,40 0 0,1 0,40" class="cm-reticle-arc"/>
+        <path d="M -34.64,-20 A 40,40 0 0,1 0,-40" class="cm-reticle-arc" style="opacity:0.4"/>
+        <path d="M 0,40 A 40,40 0 0,1 -34.64,20" class="cm-reticle-arc" style="opacity:0.4"/>
+      </g>
+      <circle cx="0" cy="0" r="2" class="cm-reticle-dot"/>
+    `;
+    this.hudOverlay.appendChild(this.moonHudReticle);
+
+    this.moonHudLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.moonHudLine.classList.add('cm-hud-line');
+    this.moonHudLine.innerHTML = `<polyline class="cm-leader-line" points="0,0 0,0 0,0"/>
+      <circle r="2" class="cm-leader-dot cm-leader-dot-body"/>
+      <circle r="2" class="cm-leader-dot cm-leader-dot-card"/>`;
+    this.hudOverlay.appendChild(this.moonHudLine);
+
+    this.moonHudCard = document.createElement('div');
+    this.moonHudCard.className = 'cm-hud-card cm-hud-card-moon';
+    this.moonHudCard.innerHTML = `
+      <button class="cm-hud-close" title="Close">×</button>
+      <div class="cm-hud-name"><span class="cm-hud-symbol" style="color:rgba(200,200,195,0.7)">☽</span> Moon</div>
+      <div class="cm-hud-stats"></div>
+    `;
+    this.hudOverlay.appendChild(this.moonHudCard);
+
+    this.moonHudCard.querySelector('.cm-hud-close')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.moonHudVisible = false;
+    });
   }
 
   private updateHUD(): void {
@@ -1710,6 +1947,7 @@ export class CosmicMotionApp {
       this.hudVisible = true;
       this.hudTargetOpacity = 1;
       this.hudOpacity = 0;
+      if (this.currentBody === 'Earth') this.moonHudVisible = true;
       this.updateHUDContent();
     }
 
@@ -1720,9 +1958,10 @@ export class CosmicMotionApp {
 
     // Reticle tracks the body — size scales with apparent body size
     const hudPlanet = PLANETS.find(p => p.name === this.currentBody);
-    const bodyRadius = this.currentBody === 'Sun' ? 4 : (hudPlanet?.sceneRadius ?? 0.5);
+    const trueR = this.bodyTrueRadius(this.currentBody);
     const camDist = this.camera.position.distanceTo(bodyPos);
-    const angularSize = camDist > 0.01 ? bodyRadius / camDist : 0;
+    const effR = this.effectiveRadius(trueR, camDist);
+    const angularSize = camDist > 0.01 ? effR / camDist : 0;
     const pixelRadius = angularSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
     const reticleSize = Math.max(60, pixelRadius * 2.6 + 40);
     const halfR = reticleSize / 2;
@@ -1828,6 +2067,103 @@ export class CosmicMotionApp {
     `;
   }
 
+  private updateMoonHUD(): void {
+    const showMoon = this.currentBody === 'Earth' && this.moonHudVisible;
+    const moonColor = '#b0b0aa';
+
+    if (!showMoon) {
+      this.moonHudReticle.style.opacity = '0';
+      this.moonHudLine.style.opacity = '0';
+      this.moonHudCard.style.opacity = '0';
+      this.moonHudCard.style.pointerEvents = 'none';
+      return;
+    }
+
+    const moonWorldPos = new THREE.Vector3();
+    this.moonMesh.getWorldPosition(moonWorldPos);
+    const screenPos = moonWorldPos.clone().project(this.camera);
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const mx = (screenPos.x * 0.5 + 0.5) * w;
+    const my = (-screenPos.y * 0.5 + 0.5) * h;
+    const behind = screenPos.z > 1;
+
+    const op = behind ? '0' : '1';
+    this.moonHudReticle.style.opacity = op;
+    this.moonHudLine.style.opacity = op;
+    this.moonHudCard.style.opacity = op;
+    this.moonHudCard.style.pointerEvents = behind ? 'none' : 'auto';
+
+    // Reticle sizing — uses perspective-faithful effective radius
+    const camDist = this.camera.position.distanceTo(moonWorldPos);
+    const moonEffR = this.effectiveRadius(MOON_TRUE_R, camDist);
+    const angSize = camDist > 0.01 ? moonEffR / camDist : 0;
+    const pixR = angSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
+    const rSize = Math.max(40, pixR * 2.6 + 30);
+    const halfR = rSize / 2;
+    this.moonHudReticle.style.width = `${rSize}px`;
+    this.moonHudReticle.style.height = `${rSize}px`;
+    this.moonHudReticle.style.transform = `translate(${mx - halfR}px, ${my - halfR}px)`;
+    this.moonHudReticle.style.setProperty('--hud-color', moonColor);
+
+    const spin = this.moonHudReticle.querySelector('.cm-reticle-spin') as SVGGElement;
+    if (spin) spin.setAttribute('transform', `rotate(${(-performance.now() * 0.02) % 360})`);
+
+    // Card — position below-left to avoid collision with main card
+    const cardW = 175;
+    const cardH = 160;
+    let cx = mx - cardW - 20;
+    let cy = my + 30;
+    cx = Math.max(8, Math.min(w - cardW - 8, cx));
+    cy = Math.max(8, Math.min(h - cardH - 8, cy));
+    this.moonHudCard.style.transform = `translate(${cx}px, ${cy}px)`;
+    this.moonHudCard.style.setProperty('--hud-color', moonColor);
+
+    // Leader line
+    const lineEl = this.moonHudLine.querySelector('.cm-leader-line') as SVGPolylineElement;
+    const dotBody = this.moonHudLine.querySelector('.cm-leader-dot-body') as SVGCircleElement;
+    const dotCard = this.moonHudLine.querySelector('.cm-leader-dot-card') as SVGCircleElement;
+    this.moonHudLine.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    this.moonHudLine.style.width = `${w}px`;
+    this.moonHudLine.style.height = `${h}px`;
+    this.moonHudLine.style.setProperty('--hud-color', moonColor);
+
+    const cardAnchorX = cx + cardW;
+    const cardAnchorY = cy + cardH / 2;
+    lineEl.setAttribute('points', `${mx},${my} ${cardAnchorX},${my} ${cardAnchorX},${cardAnchorY}`);
+    dotBody.setAttribute('cx', String(mx));
+    dotBody.setAttribute('cy', String(my));
+    dotCard.setAttribute('cx', String(cardAnchorX));
+    dotCard.setAttribute('cy', String(cardAnchorY));
+
+    // Stats
+    if (!this.data) return;
+    const statsEl = this.moonHudCard.querySelector('.cm-hud-stats')!;
+    const distKm = this.data.moonDistKm;
+    const lightSec = distKm / 299792.458;
+    // Compute phase locally
+    const sunV = new THREE.Vector3(-this.data.earthPos[0], -this.data.earthPos[1], -this.data.earthPos[2]).normalize();
+    const moonV = new THREE.Vector3(...this.data.moonDir);
+    const phaseAngleMoon = sunV.angleTo(moonV);
+    const crossMoon = new THREE.Vector3().crossVectors(sunV, moonV);
+    const waxing = crossMoon.z > 0;
+    const phaseDeg = phaseAngleMoon * 180 / Math.PI;
+    const phaseName = phaseDeg > 175 ? 'New Moon' : phaseDeg < 5 ? 'Full Moon'
+      : (waxing
+        ? (phaseDeg > 95 ? 'Wax. Crescent' : phaseDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
+        : (phaseDeg < 85 ? 'Wan. Gibbous' : phaseDeg < 95 ? '3rd Quarter' : 'Wan. Crescent'));
+    const illum = ((1 + Math.cos(phaseAngleMoon)) / 2 * 100).toFixed(1);
+
+    statsEl.innerHTML = `
+      <div class="cm-hs"><span class="cm-hsl">Distance</span><span class="cm-hsv">${Math.round(distKm).toLocaleString()} km</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Light time</span><span class="cm-hsv">${lightSec.toFixed(1)}s</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Phase</span><span class="cm-hsv">${phaseName}</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Illumination</span><span class="cm-hsv">${illum}%</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Rotation</span><span class="cm-hsv">27.3d ↻</span></div>
+      <div class="cm-hs"><span class="cm-hsl">Axial tilt</span><span class="cm-hsv">6.7°</span></div>
+    `;
+  }
+
   // ── Update scene from engine data ──
 
   private updateSceneData(): void {
@@ -1848,8 +2184,7 @@ export class CosmicMotionApp {
     // Sun direction from Earth (for lighting)
     const sunDirNorm = earthScenePos.clone().negate().normalize();
 
-    // Sun at origin — no position changes needed for sunMesh/corona/sprites
-    this.sunLabel.position.set(0, 5, 0);
+    // Sun at origin — label position updated in updatePerspectiveScaling
 
     // Planet positions — absolute heliocentric
     const planetPositions = computePlanetPositions(date);
@@ -1911,8 +2246,10 @@ export class CosmicMotionApp {
     // On first load, place camera near Earth looking toward the Sun
     if (this.firstLoad) {
       this.firstLoad = false;
-      const awayFromSun = earthScenePos.clone().normalize().multiplyScalar(12);
-      awayFromSun.y += 4;
+      const earthTR = PLANETS.find(p => p.name === 'Earth')!.radiusKm / AU_KM_VAL * AU_SCENE;
+      const initDist = earthTR * 20;
+      const awayFromSun = earthScenePos.clone().normalize().multiplyScalar(initDist);
+      awayFromSun.y += initDist * 0.35;
       this.camera.position.copy(earthScenePos.clone().add(awayFromSun));
       this.controls.target.copy(earthScenePos);
       this.controls.update();
@@ -1953,7 +2290,7 @@ export class CosmicMotionApp {
     // Update per-planet beam lines and distance labels
     for (const pp of planetPositions) {
       if (pp.name === 'Earth') continue;
-      const planetPos = this.planetMeshes.get(pp.name)?.position;
+      const planetPos = this.planetGroups.get(pp.name)?.position;
       if (!planetPos) continue;
 
       const beam = this.planetBeams.get(pp.name);
@@ -1996,6 +2333,11 @@ export class CosmicMotionApp {
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
+    this.moonAxisLine.position.copy(moonPos);
+    const moonR = EARTH_R * 0.27;
+    const moonPoleEcl = poleToEclipticAxis(269.9949, 66.5392);
+    const moonPoleDir = eclToThree(moonPoleEcl).normalize();
+    this.moonSweep.position.copy(moonPos.clone().add(moonPoleDir.clone().multiplyScalar(moonR * 2.5)));
 
     const moonLabelPos = moonPos.clone();
     moonLabelPos.y += EARTH_R * 0.7;
@@ -2128,7 +2470,7 @@ export class CosmicMotionApp {
     this.ghostSunWorldPos.copy(galDir.clone().multiplyScalar(offsetDays * driftPerDay));
     this.ghostSunSprite.position.copy(this.ghostSunWorldPos);
     this.ghostSunGlow.position.copy(this.ghostSunWorldPos);
-    this.ghostSunLabel.position.copy(this.ghostSunWorldPos).add(new THREE.Vector3(0, 4, 0));
+    this.ghostSunLabel.position.copy(this.ghostSunWorldPos).add(new THREE.Vector3(0, SUN_TRUE_R + 0.5, 0));
 
     // Ghost sun beam — from ghost Earth toward ghost Sun
     const beamArr = new Float32Array([
@@ -2178,7 +2520,8 @@ export class CosmicMotionApp {
     );
 
     // Ghost label
-    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, EARTH_R * 2.5 + 0.5, 0));
+    const ghostLabelOffset = EARTH_R * 2.5 * (this.ghostGroup.visible ? (this.ghostEarth.scale.x || 1) : 1) + 0.5;
+    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, ghostLabelOffset, 0));
     this.updateGhostLabel(ghostDate);
 
     // Travel-distance labels
@@ -2220,7 +2563,7 @@ export class CosmicMotionApp {
     const offsetDaysFull = this.ghostOffsetHours / 24;
     for (const pp of ghostPlanets) {
       if (pp.name === 'Earth') continue;
-      const planetScenePos = this.planetMeshes.get(pp.name)?.position;
+      const planetScenePos = this.planetGroups.get(pp.name)?.position;
       if (!planetScenePos) continue;
 
       // Ghost beam from planet to ghost Sun
@@ -2261,7 +2604,9 @@ export class CosmicMotionApp {
           const planet = PLANETS.find(p => p.name === pp.name);
           const sym = planet?.symbol ?? pp.name;
           const tMid = planetScenePos.clone();
-          tMid.y += planet ? planet.sceneRadius * 2.5 + 0.5 : 1.5;
+          const pMesh = this.planetMeshes.get(pp.name);
+          const pVisR = pMesh ? pMesh.scale.x * (planet?.sceneRadius ?? 0.5) : 1;
+          tMid.y += pVisR * 2.5 + 0.5;
           tLabel.position.copy(tMid);
           const tCamDist = this.camera.position.distanceTo(tMid);
           const tScale = Math.max(4, Math.min(12, tCamDist * 0.35));
@@ -2509,12 +2854,6 @@ export class CosmicMotionApp {
     (this.sunMesh.material as THREE.ShaderMaterial).uniforms.uTime.value = this.sunTime;
     (this.sunCorona.material as THREE.ShaderMaterial).uniforms.uTime.value = this.sunTime;
 
-    // Distance-based glow opacity (fade sprites when very close to Sun)
-    const distToSun = this.camera.position.distanceTo(this.sunMesh.position);
-    const sunGlowFade = Math.min(1, distToSun / 25);
-    (this.sunSprite.material as THREE.SpriteMaterial).opacity = sunGlowFade;
-    (this.sunGlow.material as THREE.SpriteMaterial).opacity = sunGlowFade * 0.8;
-
     // Starfield follows camera so stars are always at "infinite" distance
     this.starfield.position.copy(this.camera.position);
     this.starfield.quaternion.copy(this.scenePivot.quaternion);
@@ -2542,16 +2881,7 @@ export class CosmicMotionApp {
     if (this.sunTrajectoryFuture) this.sunTrajectoryFuture.visible = trajVis;
     for (const line of this.planetTrajectoryLines) line.visible = trajVis;
 
-    // Planet glows: full size when close, shrink when very far out; boost on hover
-    const glowScale = Math.max(0.3, Math.min(1, 120 / camDist));
-    for (const [name, glow] of this.planetGlows) {
-      const planet = PLANETS.find(p => p.name === name);
-      if (!planet) continue;
-      const baseSize = planet.sceneRadius + Math.sqrt(planet.sceneRadius) * 4;
-      const hoverBoost = this.hoveredBody === name ? 2.5 : 1;
-      const s = baseSize * glowScale * hoverBoost;
-      glow.scale.set(s, s, 1);
-    }
+    // Planet glows and body scaling handled in updatePerspectiveScaling()
 
     // Beam/label visibility — show only for focused body (or all if toggled)
     const ghostActive = this.ghostGroup.visible;
@@ -2668,6 +2998,10 @@ export class CosmicMotionApp {
       sweep.rotation.y = performance.now() * speed;
     }
 
+    // Moon sync rotation — sidereal period 655.7 hours (27.3 days)
+    const moonRotSpeed = this.logRotationSpeed(655.7);
+    this.moonSweep.rotation.y = performance.now() * moonRotSpeed;
+
     // Ghost sweep spins too
     if (this.ghostGroup.visible) {
       this.ghostSweep.rotation.y = performance.now() * 0.0018;
@@ -2690,9 +3024,13 @@ export class CosmicMotionApp {
     this.scenePivot.quaternion.copy(this.upQuatCurrent);
 
     this.controls.update();
+
+    this.updatePerspectiveScaling();
+
     this.renderer.render(this.scene, this.camera);
 
     this.updateHUD();
     this.updateHUDStats();
+    this.updateMoonHUD();
   };
 }
