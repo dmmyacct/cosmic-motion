@@ -595,6 +595,129 @@ canvas { display: block; }
   text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
 }
 
+/* ── Position Indicator (Spacecraft Nav Readout) ── */
+
+.cm-pos-indicator {
+  position: absolute;
+  bottom: 28px;
+  left: 16px;
+  padding: 8px 12px;
+  background: rgba(6, 8, 18, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  pointer-events: none;
+  z-index: 15;
+  min-width: 170px;
+}
+
+.cm-pos-section {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.25);
+  margin-bottom: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding-bottom: 3px;
+}
+
+.cm-pos-section:not(:first-child) {
+  margin-top: 6px;
+}
+
+.cm-pos-coord {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.cm-pos-axis {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  min-width: 12px;
+}
+
+.cm-pos-value {
+  font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.3px;
+}
+
+.cm-pos-nearest {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.cm-pos-body-symbol {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.cm-pos-body-name {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  flex: 1;
+}
+
+.cm-pos-body-dist {
+  font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.cm-pos-facing {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.cm-pos-facing-arrow {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.cm-pos-facing-symbol {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.cm-pos-facing-name {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.cm-pos-sun {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.cm-pos-sun-symbol {
+  font-size: 11px;
+  color: rgba(255, 213, 79, 0.6);
+}
+
+.cm-pos-sun-dist {
+  font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  flex: 1;
+}
+
+.cm-pos-sun-light {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
 @media (max-width: 600px) {
   .cm-panel {
     top: 8px;
@@ -607,6 +730,8 @@ canvas { display: block; }
   .cm-body-header { font-size: 9px; }
   .cm-time-panel { bottom: 14px; }
   .cm-hint { bottom: 75px; font-size: 9px; }
+  .cm-pos-indicator { bottom: 14px; left: 8px; min-width: 150px; }
+  .cm-pos-value, .cm-pos-body-dist, .cm-pos-sun-dist { font-size: 9px; }
   .cm-nav-widget {
     width: 140px;
     height: 140px;

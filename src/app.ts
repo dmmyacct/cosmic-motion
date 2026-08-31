@@ -118,7 +118,7 @@ export class CosmicMotionApp {
   private locMarker!: THREE.Group;
   private locDot!: THREE.Mesh;
   private locOverlay!: HTMLElement;
-  private locVisible = true;
+  private locVisible = false;
   private _locLastUpdate = 0;
   private trajectoryGlowPast!: THREE.Mesh;
   private trajectoryGlowFuture!: THREE.Mesh;
@@ -191,6 +191,17 @@ export class CosmicMotionApp {
   private moonSweep!: THREE.Group;
   private previousBody = 'Earth';
   private _earthScale = 1;
+  private posIndicator!: HTMLElement;
+  private posXEl!: HTMLElement;
+  private posYEl!: HTMLElement;
+  private posZEl!: HTMLElement;
+  private posNearestEl!: HTMLElement;
+  private posSunDistEl!: HTMLElement;
+  private posSunLightEl!: HTMLElement;
+  private posFacingEl!: HTMLElement;
+  private posHdgEl!: HTMLElement;
+  private posPitEl!: HTMLElement;
+  private posFrameCounter = 0;
 
   async init(container: HTMLElement): Promise<void> {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -1266,6 +1277,7 @@ export class CosmicMotionApp {
   private getBodyScenePos(name: string): THREE.Vector3 {
     if (name === 'Sun') return new THREE.Vector3(0, 0, 0);
     if (name === 'Earth') return this.earthGroup.position.clone();
+    if (name === 'Moon') return this.moonMesh.getWorldPosition(new THREE.Vector3());
     const group = this.planetGroups.get(name);
     if (group) return group.position.clone();
     const mesh = this.planetMeshes.get(name);
@@ -1444,7 +1456,7 @@ export class CosmicMotionApp {
       cosLat * Math.cos(lonRad),
       Math.sin(latRad),
       -cosLat * Math.sin(lonRad),
-    ).multiplyScalar(EARTH_R * this._earthScale * 1.005);
+    ).multiplyScalar(EARTH_R * 1.005);
 
     const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
     const tiltAxis = eclToThree([1, 0, 0]).normalize();
@@ -1458,9 +1470,11 @@ export class CosmicMotionApp {
     this.locDot.position.copy(worldPos);
 
     // Project 3D position to screen — hide if behind Earth
-    const dotDir = worldPos.clone().normalize();
-    const camDir = this.camera.position.clone().normalize();
-    const facing = dotDir.dot(camDir) > -0.1;
+    const worldAbsPos = this.locDot.getWorldPosition(new THREE.Vector3());
+    const earthWorldPos = this.earthGroup.getWorldPosition(new THREE.Vector3());
+    const dotFromEarth = worldAbsPos.clone().sub(earthWorldPos).normalize();
+    const camFromEarth = this.camera.position.clone().sub(earthWorldPos).normalize();
+    const facing = dotFromEarth.dot(camFromEarth) > -0.1;
 
     if (!facing) {
       this.locOverlay.style.opacity = '0';
@@ -1468,13 +1482,12 @@ export class CosmicMotionApp {
     }
     this.locOverlay.style.opacity = '1';
 
-    const projected = worldPos.clone().add(dotDir.multiplyScalar(0.15));
-    projected.project(this.camera);
+    const projected = worldAbsPos.clone().project(this.camera);
     const hw = window.innerWidth / 2;
     const hh = window.innerHeight / 2;
     const sx = projected.x * hw + hw;
     const sy = -projected.y * hh + hh;
-    this.locOverlay.style.transform = `translate(${sx}px, ${sy}px)`;
+    this.locOverlay.style.transform = `translate(${sx}px, ${sy - 20}px)`;
 
     // Update text content (throttled — every ~500ms)
     const now = performance.now();
@@ -2234,6 +2247,50 @@ export class CosmicMotionApp {
       e.stopPropagation();
       this.moonHudVisible = false;
     });
+
+    this.buildPositionIndicator(container);
+  }
+
+  private buildPositionIndicator(container: HTMLElement): void {
+    this.posIndicator = document.createElement('div');
+    this.posIndicator.className = 'cm-pos-indicator';
+    this.posIndicator.innerHTML = `
+      <div class="cm-pos-section">Position</div>
+      <div class="cm-pos-coord"><span class="cm-pos-axis">X</span><span class="cm-pos-value" data-pos="x">+0.0000 AU</span></div>
+      <div class="cm-pos-coord"><span class="cm-pos-axis">Y</span><span class="cm-pos-value" data-pos="y">+0.0000 AU</span></div>
+      <div class="cm-pos-coord"><span class="cm-pos-axis">Z</span><span class="cm-pos-value" data-pos="z">+0.0000 AU</span></div>
+      <div class="cm-pos-section">Nearest</div>
+      <div class="cm-pos-nearest">
+        <span class="cm-pos-body-symbol"></span>
+        <span class="cm-pos-body-name"></span>
+        <span class="cm-pos-body-dist"></span>
+      </div>
+      <div class="cm-pos-section">Heading</div>
+      <div class="cm-pos-coord"><span class="cm-pos-axis">HDG</span><span class="cm-pos-value" data-pos="hdg">0.0°</span></div>
+      <div class="cm-pos-coord"><span class="cm-pos-axis">PIT</span><span class="cm-pos-value" data-pos="pit">0.0°</span></div>
+      <div class="cm-pos-facing">
+        <span class="cm-pos-facing-arrow">→</span>
+        <span class="cm-pos-facing-symbol"></span>
+        <span class="cm-pos-facing-name"></span>
+      </div>
+      <div class="cm-pos-section">Sun</div>
+      <div class="cm-pos-sun">
+        <span class="cm-pos-sun-symbol">☉</span>
+        <span class="cm-pos-sun-dist"></span>
+        <span class="cm-pos-sun-light"></span>
+      </div>
+    `;
+    container.appendChild(this.posIndicator);
+
+    this.posXEl = this.posIndicator.querySelector('[data-pos="x"]')!;
+    this.posYEl = this.posIndicator.querySelector('[data-pos="y"]')!;
+    this.posZEl = this.posIndicator.querySelector('[data-pos="z"]')!;
+    this.posNearestEl = this.posIndicator.querySelector('.cm-pos-nearest')!;
+    this.posFacingEl = this.posIndicator.querySelector('.cm-pos-facing')!;
+    this.posHdgEl = this.posIndicator.querySelector('[data-pos="hdg"]')!;
+    this.posPitEl = this.posIndicator.querySelector('[data-pos="pit"]')!;
+    this.posSunDistEl = this.posIndicator.querySelector('.cm-pos-sun-dist')!;
+    this.posSunLightEl = this.posIndicator.querySelector('.cm-pos-sun-light')!;
   }
 
   private updateHUD(): void {
@@ -2477,6 +2534,113 @@ export class CosmicMotionApp {
     `;
   }
 
+  private updatePositionIndicator(): void {
+    this.posFrameCounter++;
+    if (this.posFrameCounter % 6 !== 0) return;
+
+    const cam = this.camera.position;
+    const auX = cam.x / AU_SCENE;
+    const auY = cam.y / AU_SCENE;
+    const auZ = cam.z / AU_SCENE;
+
+    const fmtCoord = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(4) + ' AU';
+    this.posXEl.textContent = fmtCoord(auX);
+    this.posYEl.textContent = fmtCoord(auY);
+    this.posZEl.textContent = fmtCoord(auZ);
+
+    const AU_KM = 149597870.7;
+    const bodies: { name: string; symbol: string; color: string }[] = [
+      { name: 'Sun', symbol: '☉', color: 'rgba(255,213,79,0.7)' },
+      { name: 'Moon', symbol: '☽', color: 'rgba(200,200,195,0.7)' },
+      ...PLANETS.map(p => ({ name: p.name, symbol: p.symbol, color: p.color })),
+    ];
+
+    let minDist = Infinity;
+    let nearestName = '';
+    let nearestSymbol = '';
+    let nearestColor = '';
+
+    for (const body of bodies) {
+      const pos = this.getBodyScenePos(body.name);
+      const d = cam.distanceTo(pos);
+      if (d < minDist) {
+        minDist = d;
+        nearestName = body.name;
+        nearestSymbol = body.symbol;
+        nearestColor = body.color;
+      }
+    }
+
+    const nearestAU = minDist / AU_SCENE;
+    const nearestKm = nearestAU * AU_KM;
+    let distStr: string;
+    if (nearestAU < 0.001) {
+      distStr = Math.round(nearestKm).toLocaleString() + ' km';
+    } else if (nearestAU < 0.01) {
+      distStr = nearestKm.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' km';
+    } else {
+      distStr = nearestAU.toFixed(4) + ' AU';
+    }
+
+    const symbolEl = this.posNearestEl.querySelector('.cm-pos-body-symbol') as HTMLElement;
+    const nameEl = this.posNearestEl.querySelector('.cm-pos-body-name') as HTMLElement;
+    const distEl = this.posNearestEl.querySelector('.cm-pos-body-dist') as HTMLElement;
+    symbolEl.textContent = nearestSymbol;
+    symbolEl.style.color = nearestColor;
+    nameEl.textContent = nearestName;
+    distEl.textContent = distStr;
+
+    const lookDir = this.controls.target.clone().sub(cam).normalize();
+
+    // Ecliptic heading (longitude) and pitch (latitude) from the look direction
+    // eclToThree maps ecl(x,y,z) → three(x, z, -y), so inverse:
+    // ecl X = three X, ecl Y = -three Z, ecl Z = three Y
+    const eclLookX = lookDir.x;
+    const eclLookY = -lookDir.z;
+    let hdgRad = Math.atan2(eclLookY, eclLookX);
+    if (hdgRad < 0) hdgRad += 2 * Math.PI;
+    const hdgDeg = hdgRad * 180 / Math.PI;
+    const pitDeg = Math.asin(Math.max(-1, Math.min(1, lookDir.y))) * 180 / Math.PI;
+
+    this.posHdgEl.textContent = hdgDeg.toFixed(1) + '°';
+    this.posPitEl.textContent = (pitDeg >= 0 ? '+' : '') + pitDeg.toFixed(1) + '°';
+
+    let minAngle = Infinity;
+    let facingName = '';
+    let facingSymbol = '';
+    let facingColor = '';
+    for (const body of bodies) {
+      const pos = this.getBodyScenePos(body.name);
+      const toBody = pos.clone().sub(cam).normalize();
+      const angle = lookDir.angleTo(toBody);
+      if (angle < minAngle) {
+        minAngle = angle;
+        facingName = body.name;
+        facingSymbol = body.symbol;
+        facingColor = body.color;
+      }
+    }
+    const facSymEl = this.posFacingEl.querySelector('.cm-pos-facing-symbol') as HTMLElement;
+    const facNameEl = this.posFacingEl.querySelector('.cm-pos-facing-name') as HTMLElement;
+    facSymEl.textContent = facingSymbol;
+    facSymEl.style.color = facingColor;
+    facNameEl.textContent = facingName;
+
+    const sunDistScene = cam.length();
+    const sunDistAU = sunDistScene / AU_SCENE;
+    this.posSunDistEl.textContent = sunDistAU.toFixed(4) + ' AU';
+
+    const sunKm = sunDistAU * AU_KM;
+    const lightSec = sunKm / 299792.458;
+    if (lightSec < 60) {
+      this.posSunLightEl.textContent = lightSec.toFixed(1) + 's';
+    } else {
+      const m = Math.floor(lightSec / 60);
+      const s = Math.round(lightSec % 60);
+      this.posSunLightEl.textContent = m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+    }
+  }
+
   // ── Update scene from engine data ──
 
   private updateSceneData(): void {
@@ -2566,12 +2730,14 @@ export class CosmicMotionApp {
     // On first load, place camera near Earth looking toward the Sun
     if (this.firstLoad) {
       this.firstLoad = false;
-      const earthTR = PLANETS.find(p => p.name === 'Earth')!.radiusKm / AU_KM_VAL * AU_SCENE;
-      const initDist = earthTR * 20;
-      const awayFromSun = earthScenePos.clone().normalize().multiplyScalar(initDist);
-      awayFromSun.y += initDist * 0.35;
-      this.camera.position.copy(earthScenePos.clone().add(awayFromSun));
+      const camPos = new THREE.Vector3(
+        0.9399 * AU_SCENE,
+        0.0001 * AU_SCENE,
+        0.3686 * AU_SCENE,
+      );
+      this.camera.position.copy(camPos);
       this.controls.target.copy(earthScenePos);
+      this.controls.minDistance = 0.0005;
       this.controls.update();
     }
 
@@ -3208,6 +3374,9 @@ export class CosmicMotionApp {
     const ghostActive = this.ghostGroup.visible;
     const focusedBody = this.currentBody;
 
+    // Sun label — hide when focused on the Sun
+    this.sunLabel.visible = focusedBody !== 'Sun';
+
     // Earth beam/labels
     const earthShow = focusedBody === 'Earth' || this.showAllBeams;
     this.sunBeam.visible = earthShow;
@@ -3356,5 +3525,6 @@ export class CosmicMotionApp {
     this.updateHUD();
     this.updateHUDStats();
     this.updateMoonHUD();
+    this.updatePositionIndicator();
   };
 }

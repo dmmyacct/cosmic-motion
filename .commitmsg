@@ -1,6 +1,6 @@
-Cinematic camera transitions — Bezier arc path with Sun-anchored look
+Spacecraft nav readout, heading/facing indicator, initial view and location fixes
 
-Replace linear camera slide with quadratic Bezier arc that lifts above
-the ecliptic during transit. Look target sweeps through the Sun as a
-mid-flight anchor for spatial orientation. Quintic ease-in-out for
-gentle acceleration/deceleration. Rollback: 6ddf974.
+Add bottom-left position indicator HUD showing heliocentric ecliptic
+coordinates (X/Y/Z in AU), nearest body with distance, heading/pitch,
+facing body, and Sun distance with light-time. Fix location marker
+projection and toggle sync. Set default camera at ~50k km from Earth.

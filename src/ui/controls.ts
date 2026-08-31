@@ -225,7 +225,10 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const tableWrap = panel.querySelector('.cm-table-wrap') as HTMLElement;
   const toggleBtn = panel.querySelector('.cm-panel-toggle') as HTMLElement;
 
-  let tableVisible = true;
+  let tableVisible = false;
+  tableWrap.style.display = 'none';
+  toggleBtn.textContent = '▸';
+  panel.classList.add('cm-collapsed');
   toggleBtn.addEventListener('click', () => {
     tableVisible = !tableVisible;
     tableWrap.style.display = tableVisible ? '' : 'none';
@@ -269,7 +272,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-rev-btn" title="Reverse">◀</button>
       <button class="cm-speed-btn" title="Playback speed">1 hr/s</button>
       <button class="cm-follow-btn" title="Follow ghost">Follow</button>
-      <button class="cm-loc-btn active" title="My location">📍</button>
+      <button class="cm-loc-btn" title="My location">📍</button>
       <button class="cm-orbits-btn active" title="Toggle orbit rings">◯</button>
       <button class="cm-traj-btn active" title="Toggle trajectories">∿</button>
       <button class="cm-beams-btn" title="Show all planet beams">☀</button>
