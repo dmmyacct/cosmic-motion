@@ -43,6 +43,34 @@ function eclToThree(v: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(v[0], v[2], -v[1]);
 }
 
+const NOISE_GLSL = `
+  float hash3(vec3 p) {
+    p = fract(p * vec3(443.897, 441.423, 437.195));
+    p += dot(p, p.yzx + 19.19);
+    return fract((p.x + p.y) * p.z);
+  }
+  float noise3d(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+    return mix(
+      mix(mix(hash3(i), hash3(i+vec3(1,0,0)), f.x),
+          mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
+      mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
+          mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y),
+      f.z);
+  }
+  float fbm(vec3 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 6; i++) {
+      v += a * noise3d(p);
+      p = p * 2.03 + vec3(1.7, 9.2, 3.4);
+      a *= 0.49;
+    }
+    return v;
+  }
+`;
+
 export class CosmicMotionApp {
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
@@ -575,34 +603,6 @@ export class CosmicMotionApp {
     // ── Photosphere — procedural noise surface with limb darkening ──
     const sunGeo = new THREE.SphereGeometry(SUN_R, 64, 64);
 
-    const noiseGLSL = `
-      float hash3(vec3 p) {
-        p = fract(p * vec3(443.897, 441.423, 437.195));
-        p += dot(p, p.yzx + 19.19);
-        return fract((p.x + p.y) * p.z);
-      }
-      float noise3d(vec3 x) {
-        vec3 i = floor(x);
-        vec3 f = fract(x);
-        f = f*f*(3.0-2.0*f);
-        return mix(
-          mix(mix(hash3(i), hash3(i+vec3(1,0,0)), f.x),
-              mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
-          mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
-              mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y),
-          f.z);
-      }
-      float fbm(vec3 p) {
-        float v = 0.0, a = 0.5;
-        for (int i = 0; i < 6; i++) {
-          v += a * noise3d(p);
-          p = p * 2.03 + vec3(1.7, 9.2, 3.4);
-          a *= 0.49;
-        }
-        return v;
-      }
-    `;
-
     const sunMat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 } },
       vertexShader: `
@@ -622,7 +622,7 @@ export class CosmicMotionApp {
         varying vec3 vNormal;
         varying vec3 vViewDir;
         varying vec3 vPosition;
-        ${noiseGLSL}
+        ${NOISE_GLSL}
         void main() {
           float NdotV = max(0.0, dot(vNormal, vViewDir));
           float limb = pow(NdotV, 0.42);
@@ -680,7 +680,7 @@ export class CosmicMotionApp {
         varying vec3 vNormal;
         varying vec3 vViewDir;
         varying vec3 vPosition;
-        ${noiseGLSL}
+        ${NOISE_GLSL}
         void main() {
           float NdotV = max(0.0, dot(vNormal, vViewDir));
           float fresnel = pow(1.0 - NdotV, 2.0);
@@ -830,30 +830,276 @@ export class CosmicMotionApp {
       this.scenePivot.add(group);
       this.planetGroups.set(planet.name, group);
 
-      const geo = new THREE.SphereGeometry(planet.sceneRadius, 24, 24);
-      const mat = new THREE.ShaderMaterial({
-        uniforms: {
-          sunDirection: { value: new THREE.Vector3(1, 0, 0) },
-          baseColor: { value: new THREE.Color(planet.color) },
-        },
-        vertexShader: `
-          varying vec3 vWorldNormal;
-          void main() {
-            vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: `
-          uniform vec3 sunDirection;
-          uniform vec3 baseColor;
-          varying vec3 vWorldNormal;
-          void main() {
-            float NdotL = dot(vWorldNormal, normalize(sunDirection));
-            float lit = 0.04 + 0.96 * max(0.0, NdotL);
-            gl_FragColor = vec4(baseColor * lit, 1.0);
-          }
-        `,
-      });
+      const geo = new THREE.SphereGeometry(planet.sceneRadius, 48, 48);
+
+      let mat: THREE.ShaderMaterial;
+      if (planet.name === 'Mercury') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 3.0;
+              float n = fbm(p);
+              float craters = fbm(p * 5.0 + vec3(7.0));
+              craters = smoothstep(0.45, 0.55, craters) * 0.15;
+              vec3 color = mix(vec3(0.35, 0.32, 0.30), vec3(0.65, 0.62, 0.58), n);
+              color -= craters;
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.02 + 0.98 * smoothstep(-0.02, 0.02, NdotL);
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Venus') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+              vViewDir = normalize(-mvPos.xyz);
+              gl_Position = projectionMatrix * mvPos;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 2.0;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float bands = sin(lat * 8.0) * 0.05;
+              float n = fbm(p + vec3(0.0, bands, 0.0));
+              vec3 color = mix(vec3(0.85, 0.75, 0.50), vec3(0.95, 0.90, 0.70), n);
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.08 + 0.92 * smoothstep(-0.3, 0.3, NdotL);
+              float fresnel = pow(1.0 - max(0.0, dot(vViewDir, vWorldNormal)), 2.5);
+              color += vec3(0.95, 0.85, 0.55) * fresnel * 0.15;
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Mars') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 3.0;
+              float n = fbm(p);
+              float mare = fbm(p * 2.0 + vec3(3.0, 1.0, 5.0));
+              mare = smoothstep(0.4, 0.6, mare) * 0.12;
+              vec3 color = mix(vec3(0.72, 0.35, 0.18), vec3(0.88, 0.58, 0.35), n);
+              color -= mare;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float polar = smoothstep(0.82, 0.95, abs(lat));
+              color = mix(color, vec3(0.92, 0.93, 0.95), polar);
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.04 + 0.96 * smoothstep(-0.1, 0.15, NdotL);
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Jupiter') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+              vViewDir = normalize(-mvPos.xyz);
+              gl_Position = projectionMatrix * mvPos;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 2.0;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float bandBase = sin(lat * 14.0 + fbm(p * 3.0) * 0.6) * 0.5 + 0.5;
+              float turb = fbm(p * 4.0) * 0.15;
+              float band = clamp(bandBase + turb, 0.0, 1.0);
+              vec3 color = mix(vec3(0.78, 0.54, 0.30), vec3(0.93, 0.87, 0.73), band);
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.06 + 0.94 * max(0.0, NdotL);
+              float fresnel = pow(1.0 - max(0.0, dot(vViewDir, vWorldNormal)), 2.5);
+              color += vec3(0.90, 0.82, 0.65) * fresnel * 0.15;
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Saturn') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+              vViewDir = normalize(-mvPos.xyz);
+              gl_Position = projectionMatrix * mvPos;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 2.0;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float bandBase = sin(lat * 10.0 + fbm(p * 2.0) * 0.3) * 0.5 + 0.5;
+              float turb = fbm(p * 3.0) * 0.08;
+              float band = clamp(bandBase + turb, 0.0, 1.0);
+              vec3 color = mix(vec3(0.84, 0.74, 0.52), vec3(0.94, 0.89, 0.70), band);
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.06 + 0.94 * max(0.0, NdotL);
+              float fresnel = pow(1.0 - max(0.0, dot(vViewDir, vWorldNormal)), 2.5);
+              color += vec3(0.92, 0.86, 0.65) * fresnel * 0.15;
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Uranus') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+              vViewDir = normalize(-mvPos.xyz);
+              gl_Position = projectionMatrix * mvPos;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 2.5;
+              float n = fbm(p) * 0.15;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float polarDark = smoothstep(0.6, 1.0, abs(lat)) * 0.05;
+              vec3 color = mix(vec3(0.55, 0.78, 0.82), vec3(0.62, 0.84, 0.88), n);
+              color -= polarDark;
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.06 + 0.94 * max(0.0, NdotL);
+              float fresnel = pow(1.0 - max(0.0, dot(vViewDir, vWorldNormal)), 2.5);
+              color += vec3(0.50, 0.78, 0.85) * fresnel * 0.15;
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else if (planet.name === 'Neptune') {
+        mat = new THREE.ShaderMaterial({
+          uniforms: { sunDirection: { value: new THREE.Vector3(1, 0, 0) } },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            void main() {
+              vPosition = position;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+              vViewDir = normalize(-mvPos.xyz);
+              gl_Position = projectionMatrix * mvPos;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec3 vWorldNormal;
+            varying vec3 vViewDir;
+            varying vec3 vPosition;
+            ${NOISE_GLSL}
+            void main() {
+              vec3 p = vPosition * 2.5;
+              float lat = asin(clamp(normalize(vPosition).y, -1.0, 1.0));
+              float bandBase = sin(lat * 8.0 + fbm(p * 2.0) * 0.3) * 0.5 + 0.5;
+              float n = fbm(p) * 0.1;
+              float band = clamp(bandBase * 0.15 + n, 0.0, 1.0);
+              vec3 color = mix(vec3(0.20, 0.30, 0.62), vec3(0.35, 0.48, 0.78), band);
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.06 + 0.94 * max(0.0, NdotL);
+              float fresnel = pow(1.0 - max(0.0, dot(vViewDir, vWorldNormal)), 2.5);
+              color += vec3(0.30, 0.35, 0.75) * fresnel * 0.15;
+              gl_FragColor = vec4(color * lit, 1.0);
+            }
+          `,
+        });
+      } else {
+        mat = new THREE.ShaderMaterial({
+          uniforms: {
+            sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+            baseColor: { value: new THREE.Color(planet.color) },
+          },
+          vertexShader: `
+            varying vec3 vWorldNormal;
+            void main() {
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            uniform vec3 baseColor;
+            varying vec3 vWorldNormal;
+            void main() {
+              float NdotL = dot(vWorldNormal, normalize(sunDirection));
+              float lit = 0.04 + 0.96 * max(0.0, NdotL);
+              gl_FragColor = vec4(baseColor * lit, 1.0);
+            }
+          `,
+        });
+      }
       const mesh = new THREE.Mesh(geo, mat);
       group.add(mesh);
       this.planetMeshes.set(planet.name, mesh);
@@ -890,23 +1136,74 @@ export class CosmicMotionApp {
       group.add(sweepArc);
       this.planetSweeps.set(planet.name, sweepArc);
 
-      const c = new THREE.Color(planet.color);
-      const glowCanvas = document.createElement('canvas');
-      glowCanvas.width = 64; glowCanvas.height = 64;
-      const gctx = glowCanvas.getContext('2d')!;
-      const gg = gctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-      gg.addColorStop(0, `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},0.25)`);
-      gg.addColorStop(1, 'rgba(0,0,0,0)');
-      gctx.fillStyle = gg;
-      gctx.fillRect(0, 0, 64, 64);
-      const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(glowCanvas),
-        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      const glowSize = planet.sceneRadius + Math.sqrt(planet.sceneRadius) * 4;
-      glowSprite.scale.set(glowSize, glowSize, 1);
-      group.add(glowSprite);
-      this.planetGlows.set(planet.name, glowSprite);
+      if (planet.name === 'Saturn') {
+        const innerR = planet.sceneRadius * 1.2;
+        const outerR = planet.sceneRadius * 2.3;
+        const ringGeo = new THREE.RingGeometry(innerR, outerR, 128, 1);
+        const pos = ringGeo.attributes.position;
+        const uv = ringGeo.attributes.uv;
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i);
+          const y = pos.getY(i);
+          const dist = Math.sqrt(x * x + y * y);
+          const t = (dist - innerR) / (outerR - innerR);
+          uv.setXY(i, uv.getX(i), t);
+        }
+
+        const ringMat = new THREE.ShaderMaterial({
+          uniforms: {
+            sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            varying vec3 vWorldNormal;
+            varying vec3 vWorldPos;
+            void main() {
+              vUv = uv;
+              vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+              vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunDirection;
+            varying vec2 vUv;
+            varying vec3 vWorldNormal;
+            varying vec3 vWorldPos;
+            void main() {
+              float r = vUv.y;
+              float ringR = mix(1.2, 2.3, r);
+
+              float cRing = smoothstep(1.2, 1.28, ringR) * (1.0 - smoothstep(1.50, 1.53, ringR)) * 0.35;
+              float bRing = smoothstep(1.53, 1.56, ringR) * (1.0 - smoothstep(1.93, 1.95, ringR)) * 1.0;
+              float aRing = smoothstep(2.03, 2.06, ringR) * (1.0 - smoothstep(2.24, 2.27, ringR)) * 0.7;
+
+              float cassiniGap = 1.0 - smoothstep(1.93, 1.95, ringR) * (1.0 - smoothstep(2.01, 2.03, ringR));
+              float enckeGap = 1.0 - smoothstep(2.20, 2.21, ringR) * (1.0 - smoothstep(2.22, 2.23, ringR)) * 0.8;
+
+              float brightness = (cRing + bRing + aRing) * cassiniGap * enckeGap;
+              float alpha = brightness;
+
+              if (alpha < 0.01) discard;
+
+              vec3 ringColor = mix(vec3(0.78, 0.72, 0.58), vec3(0.88, 0.84, 0.72), r);
+
+              float NdotL = dot(normalize(vWorldNormal), normalize(sunDirection));
+              float lit = 0.2 + 0.8 * abs(NdotL);
+
+              gl_FragColor = vec4(ringColor * lit * brightness, alpha * 0.9);
+            }
+          `,
+          transparent: true,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+
+        const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+        ringMesh.quaternion.copy(tiltQuat);
+        group.add(ringMesh);
+        this.planetMeshes.set('SaturnRings', ringMesh);
+      }
     }
   }
 
@@ -1060,11 +1357,9 @@ export class CosmicMotionApp {
         sweep.position.copy(poleDir.clone().multiplyScalar(planet.sceneRadius * 2.5 * sf));
       }
 
-      const glow = this.planetGlows.get(planet.name);
-      if (glow) {
-        const glowSize = eff + Math.sqrt(Math.max(eff, 0.001)) * 4;
-        const hoverBoost = this.hoveredBody === planet.name ? 2.5 : 1;
-        glow.scale.set(glowSize * hoverBoost, glowSize * hoverBoost, 1);
+      if (planet.name === 'Saturn') {
+        const rings = this.planetMeshes.get('SaturnRings');
+        if (rings) rings.scale.setScalar(sf);
       }
     }
 
@@ -2240,6 +2535,12 @@ export class CosmicMotionApp {
       if (mesh) {
         const toSun = pos.clone().negate().normalize();
         (mesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
+        if (pp.name === 'Saturn') {
+          const rings = this.planetMeshes.get('SaturnRings');
+          if (rings) {
+            (rings.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
+          }
+        }
       }
     }
 

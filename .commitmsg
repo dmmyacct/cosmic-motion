@@ -1,19 +1,8 @@
-Perspective-faithful body scaling — render bodies at true angular size
+Realistic planet shaders, Saturn rings, remove planet glow halos
 
-Replace fixed 235x-exaggerated body sizes with per-frame perspective-faithful
-scaling. Every body now renders at the angular size a human observer would
-perceive from the camera's position, with a 3px minimum so distant bodies
-remain visible. Close to the Sun it fills the screen; from Earth's distance
-it's a small bright disk — matching reality.
-
-Key changes:
-- True proportional radii (radiusKm / AU_KM * AU_SCENE) for all bodies
-- Per-frame updatePerspectiveScaling() scales meshes, coronas, glows, axes
-- Dynamic camera.near and controls.minDistance for close zoom on small bodies
-- Navigation viewDist uses true radii instead of exaggerated mesh sizes
-- HUD reticle tracks effective (displayed) radius
-- Location marker and velocity arrow scale with Earth's perspective factor
-- PRINCIPLES.md updated to document the new Tier 2 scale system
-
-This is a large structural change to the scale system. To rollback:
-  git revert HEAD
+Replace flat-color planet materials with unique procedural shaders
+(Mercury cratered, Venus cloudy, Mars with polar caps, Jupiter/Saturn
+banded, Uranus/Neptune atmospheric). Add Saturn ring system with
+Cassini division. Remove additive-blended glow sprites from all
+planets. Extract shared noise GLSL to module scope. Another large
+visual change — rollback target is 6d3bcf3.
