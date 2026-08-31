@@ -167,8 +167,9 @@ export class CosmicMotionApp {
   private isNavigating = false;
   private navStartCamPos = new THREE.Vector3();
   private navEndCamPos = new THREE.Vector3();
+  private navControlPt = new THREE.Vector3();
   private navStartTarget = new THREE.Vector3();
-  private navSunTarget = new THREE.Vector3();
+  private navMidTarget = new THREE.Vector3();
   private navEndTarget = new THREE.Vector3();
   private navTime = 0;
   private navDuration = 2.0;
@@ -1227,7 +1228,6 @@ export class CosmicMotionApp {
       ? Math.max(trueR * 8, trueR * 5)
       : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
 
-    // Camera on the anti-Sun side, elevated — Sun is visible behind the target body
     this.navEndCamPos.copy(targetPos)
       .add(sunDir.clone().multiplyScalar(-viewDist))
       .add(up.clone().multiplyScalar(viewDist * 0.35));
@@ -1235,13 +1235,20 @@ export class CosmicMotionApp {
     this.navEndTarget.copy(targetPos);
     this.navStartCamPos.copy(this.camera.position);
     this.navStartTarget.copy(this.controls.target);
-    this.navSunTarget.copy(sunPos);
+    this.navMidTarget.copy(sunPos);
+
+    // Quadratic Bezier control point: midpoint lifted above the ecliptic plane
+    // for a sweeping arc that gives spatial context during transit
+    const mid = this.navStartCamPos.clone().lerp(this.navEndCamPos, 0.5);
+    const travelDist = this.navStartCamPos.distanceTo(this.navEndCamPos);
+    const arcHeight = Math.max(travelDist * 0.25, viewDist * 2);
+    mid.y += arcHeight;
+    this.navControlPt.copy(mid);
 
     this.isNavigating = true;
     this.navTime = 0;
 
-    const travelDist = this.camera.position.distanceTo(this.navEndCamPos);
-    this.navDuration = Math.max(1.8, Math.min(4.0, 1.0 + Math.log2(1 + travelDist / 20)));
+    this.navDuration = Math.max(2.0, Math.min(5.0, 1.2 + Math.log2(1 + travelDist / 10) * 0.8));
     this.controls.enabled = false;
   }
 
@@ -3252,29 +3259,32 @@ export class CosmicMotionApp {
     for (const l of this.planetGhostDistLabels.values()) this.scaleDistLabel(l);
     for (const l of this.planetTravelLabels.values()) this.scaleDistLabel(l);
 
-    // Navigation animation — smooth slide, Sun-anchored look target
+    // Navigation animation — Bezier arc with quintic ease
     if (this.isNavigating) {
       this.navTime += delta;
       const tRaw = Math.min(1, this.navTime / this.navDuration);
-      // Smooth ease for camera position
-      const tPos = tRaw < 0.5 ? 4 * tRaw * tRaw * tRaw : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
 
-      // Camera slides smoothly from start to end
-      this.camera.position.lerpVectors(this.navStartCamPos, this.navEndCamPos, tPos);
+      // Quintic ease-in-out: very gentle start/stop, smooth mid-flight
+      const t = tRaw < 0.5
+        ? 16 * tRaw * tRaw * tRaw * tRaw * tRaw
+        : 1 - Math.pow(-2 * tRaw + 2, 5) / 2;
 
-      // Look target: anchor on the Sun for 0-70%, then shift to destination body 70-100%
-      const LOOK_SHIFT = 0.7;
-      if (tRaw < LOOK_SHIFT) {
-        // Blend from initial look target to the Sun
-        const p = Math.min(1, tRaw / 0.2); // reach Sun focus within first 20%
-        const sp = p * p * (3 - 2 * p);
-        this.controls.target.lerpVectors(this.navStartTarget, this.navSunTarget, sp);
-      } else {
-        // Gently shift from Sun to the destination body
-        let p = (tRaw - LOOK_SHIFT) / (1 - LOOK_SHIFT);
-        p = p * p * (3 - 2 * p);
-        this.controls.target.lerpVectors(this.navSunTarget, this.navEndTarget, p);
-      }
+      // Quadratic Bezier: P = (1-t)²·A + 2(1-t)t·C + t²·B
+      const omt = 1 - t;
+      this.camera.position.set(
+        omt * omt * this.navStartCamPos.x + 2 * omt * t * this.navControlPt.x + t * t * this.navEndCamPos.x,
+        omt * omt * this.navStartCamPos.y + 2 * omt * t * this.navControlPt.y + t * t * this.navEndCamPos.y,
+        omt * omt * this.navStartCamPos.z + 2 * omt * t * this.navControlPt.z + t * t * this.navEndCamPos.z,
+      );
+
+      // Look target: Bezier through Sun — keeps the Sun in view as an anchor
+      // during transit, then settles smoothly on the destination
+      const omt2 = 1 - t;
+      this.controls.target.set(
+        omt2 * omt2 * this.navStartTarget.x + 2 * omt2 * t * this.navMidTarget.x + t * t * this.navEndTarget.x,
+        omt2 * omt2 * this.navStartTarget.y + 2 * omt2 * t * this.navMidTarget.y + t * t * this.navEndTarget.y,
+        omt2 * omt2 * this.navStartTarget.z + 2 * omt2 * t * this.navMidTarget.z + t * t * this.navEndTarget.z,
+      );
 
       if (tRaw >= 0.999) {
         this.isNavigating = false;

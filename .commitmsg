@@ -1,6 +1,6 @@
-Precise orbit paths — sample from same ephemeris as body positions
+Cinematic camera transitions — Bezier arc path with Sun-anchored look
 
-Replace static Keplerian true-anomaly sweep with date-sampled orbit
-paths using the same computation as real-time placement (VSOP87 for
-Earth, Kepler solver for other planets). Orbits now rebuild on each
-data refresh. Moon orbit ring respects orbit toggle. Rollback: 81b5f84.
+Replace linear camera slide with quadratic Bezier arc that lifts above
+the ecliptic during transit. Look target sweeps through the Sun as a
+mid-flight anchor for spatial orientation. Quintic ease-in-out for
+gentle acceleration/deceleration. Rollback: 6ddf974.
