@@ -4,7 +4,9 @@
  * Positions are heliocentric ecliptic cartesian (AU).
  */
 
-import { dateToTDBJD, J2000_JD } from './time';
+import { dateToTDBJD, dateToJD, J2000_JD } from './time';
+import { earthHelioEcliptic } from './vsop87';
+import { eclipticSphericalToCartesian } from './coordinates';
 
 const DEG = Math.PI / 180;
 
@@ -283,30 +285,34 @@ export function computePlanetPositions(date: Date): PlanetPosition[] {
   });
 }
 
-export function computeOrbitPath(planet: PlanetInfo, steps = 200): [number, number, number][] {
-  const a = planet.semiMajorAU;
-  const e = planet.eccentricity;
-  const omega = (planet.longPerihelion - planet.longAscNode) * DEG;
-  const Omega = planet.longAscNode * DEG;
-  const inc = planet.inclination * DEG;
-
-  const cosO = Math.cos(Omega), sinO = Math.sin(Omega);
-  const cosW = Math.cos(omega), sinW = Math.sin(omega);
-  const cosI = Math.cos(inc), sinI = Math.sin(inc);
+/**
+ * Compute an orbit path by sampling the body's actual position over one full
+ * orbital period centered on the given date.  This guarantees the orbit line
+ * passes through the body's current position because it uses the same
+ * computation used for real-time placement.
+ *
+ * For Earth, positions come from VSOP87 (matching the observer module).
+ * For all other planets, positions come from computePlanetPosAtJD (Keplerian).
+ */
+export function computeOrbitPath(
+  planet: PlanetInfo, steps = 360, date?: Date,
+): [number, number, number][] {
+  const periodDays = 360 / planet.meanMotionDegDay;
+  const refDate = date ?? new Date();
+  const refJD = dateToTDBJD(refDate);
+  const startJD = refJD - periodDays / 2;
 
   const points: [number, number, number][] = [];
   for (let i = 0; i <= steps; i++) {
-    const v = (i / steps) * 2 * Math.PI;
-    const r = a * (1 - e * e) / (1 + e * Math.cos(v));
-    const xOrb = r * Math.cos(v);
-    const yOrb = r * Math.sin(v);
-
-    const x = (cosO * cosW - sinO * sinW * cosI) * xOrb
-            + (-cosO * sinW - sinO * cosW * cosI) * yOrb;
-    const y = (sinO * cosW + cosO * sinW * cosI) * xOrb
-            + (-sinO * sinW + cosO * cosW * cosI) * yOrb;
-    const z = (sinW * sinI) * xOrb + (cosW * sinI) * yOrb;
-    points.push([x, y, z]);
+    const jd = startJD + (i / steps) * periodDays;
+    let pos: [number, number, number];
+    if (planet.name === 'Earth') {
+      const earth = earthHelioEcliptic(jd);
+      pos = eclipticSphericalToCartesian(earth.L, earth.B, earth.R);
+    } else {
+      pos = computePlanetPosAtJD(planet, jd).pos;
+    }
+    points.push(pos);
   }
   return points;
 }

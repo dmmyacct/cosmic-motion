@@ -1,8 +1,6 @@
-Realistic planet shaders, Saturn rings, remove planet glow halos
+Precise orbit paths — sample from same ephemeris as body positions
 
-Replace flat-color planet materials with unique procedural shaders
-(Mercury cratered, Venus cloudy, Mars with polar caps, Jupiter/Saturn
-banded, Uranus/Neptune atmospheric). Add Saturn ring system with
-Cassini division. Remove additive-blended glow sprites from all
-planets. Extract shared noise GLSL to module scope. Another large
-visual change — rollback target is 6d3bcf3.
+Replace static Keplerian true-anomaly sweep with date-sampled orbit
+paths using the same computation as real-time placement (VSOP87 for
+Earth, Kepler solver for other planets). Orbits now rebuild on each
+data refresh. Moon orbit ring respects orbit toggle. Rollback: 81b5f84.

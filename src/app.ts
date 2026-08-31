@@ -810,7 +810,7 @@ export class CosmicMotionApp {
     this.scenePivot.add(this.planetOrbitsGroup);
 
     for (const planet of PLANETS) {
-      const orbitPath = computeOrbitPath(planet, 200);
+      const orbitPath = computeOrbitPath(planet, 360, new Date());
       const orbitPts = orbitPath.map(p => eclToThree(p));
       const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPts);
       const orbitLine = new THREE.Line(orbitGeo, new THREE.LineBasicMaterial({
@@ -1841,6 +1841,17 @@ export class CosmicMotionApp {
     this.moonOrbitLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
   }
 
+  private rebuildPlanetOrbits(date: Date): void {
+    for (const planet of PLANETS) {
+      const line = this.planetOrbitLines.get(planet.name);
+      if (!line) continue;
+      const path = computeOrbitPath(planet, 360, date);
+      const pts = path.map(p => eclToThree(p));
+      line.geometry.dispose();
+      line.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    }
+  }
+
   private buildGhost(): void {
     this.ghostGroup = new THREE.Group();
     this.ghostGroup.visible = false;
@@ -2470,6 +2481,7 @@ export class CosmicMotionApp {
 
     this.buildTrajectoryMeshes();
     this.rebuildMoonOrbit(date);
+    this.rebuildPlanetOrbits(date);
     this.arrowHelper.setDirection(velocityDir);
 
     // Heliocentric layout: Sun at origin, Earth at absolute heliocentric position
@@ -3172,6 +3184,7 @@ export class CosmicMotionApp {
       const baseLine = this.hoveredBody === name ? 0.5 : 0.12;
       (line.material as THREE.LineBasicMaterial).opacity = baseLine * orbitFade;
     }
+    (this.moonOrbitLine.material as THREE.LineBasicMaterial).opacity = this.showOrbits ? 0.1 * orbitFade : 0;
     // Trajectory visibility toggle
     const trajVis = this.showTrajectories;
     if (this.trajectoryMesh) this.trajectoryMesh.visible = trajVis;
