@@ -1854,6 +1854,17 @@ export class CosmicMotionApp {
     return `${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}`;
   }
 
+  private beamBelowDir(beamDir: THREE.Vector3): THREE.Vector3 {
+    const viewDir = this.camera.getWorldDirection(new THREE.Vector3());
+    const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const screenBeam = beamDir.clone().sub(viewDir.clone().multiplyScalar(beamDir.dot(viewDir)));
+    if (screenBeam.lengthSq() < 0.0001) return screenUp.clone().negate();
+    screenBeam.normalize();
+    const perp = new THREE.Vector3().crossVectors(viewDir, screenBeam).normalize();
+    if (perp.dot(screenUp) > 0) perp.negate();
+    return perp;
+  }
+
   private computePlanetTravelDist(trajectoryPoints: { pos: [number, number, number]; dayOffset: number }[], offsetDays: number): number {
     const absDays = Math.abs(offsetDays);
     const sign = offsetDays >= 0 ? 1 : -1;
@@ -3259,9 +3270,7 @@ export class CosmicMotionApp {
     const vFovE = this.camera.fov * Math.PI / 180;
     const pxE = camDistE * Math.tan(vFovE / 2);
     const sunLabelPos = earthScenePos.clone().sub(sunToEarth.clone().multiplyScalar(pxE * 0.12));
-    const camRight = new THREE.Vector3().crossVectors(this.camera.up, sunToEarth).normalize();
-    const belowDir = new THREE.Vector3().crossVectors(sunToEarth, camRight).normalize();
-    if (belowDir.dot(this.camera.up) > 0) belowDir.negate();
+    const belowDir = this.beamBelowDir(sunToEarth);
     sunLabelPos.add(belowDir.multiplyScalar(pxE * 0.032));
     this.sunDistLabel.position.copy(sunLabelPos);
     const sunKm = this.data.sunDistAU * 149597870.7;
@@ -3292,9 +3301,7 @@ export class CosmicMotionApp {
         const camDistP = this.camera.position.distanceTo(planetPos);
         const vFovP = this.camera.fov * Math.PI / 180;
         const pxP = camDistP * Math.tan(vFovP / 2);
-        const pCamRight = new THREE.Vector3().crossVectors(this.camera.up, pBeamDir).normalize();
-        const pBelowDir = new THREE.Vector3().crossVectors(pBeamDir, pCamRight).normalize();
-        if (pBelowDir.dot(this.camera.up) > 0) pBelowDir.negate();
+        const pBelowDir = this.beamBelowDir(pBeamDir);
         const labelPos = planetPos.clone().sub(pBeamDir.clone().multiplyScalar(pxP * 0.12));
         labelPos.add(pBelowDir.multiplyScalar(pxP * 0.032));
         distLabel.position.copy(labelPos);
@@ -3487,9 +3494,7 @@ export class CosmicMotionApp {
     const gCamDistE = this.camera.position.distanceTo(ghostPos);
     const gVFov = this.camera.fov * Math.PI / 180;
     const gPx = gCamDistE * Math.tan(gVFov / 2);
-    const gCamRight = new THREE.Vector3().crossVectors(this.camera.up, gBeamDir).normalize();
-    const gBelowDir = new THREE.Vector3().crossVectors(gBeamDir, gCamRight).normalize();
-    if (gBelowDir.dot(this.camera.up) > 0) gBelowDir.negate();
+    const gBelowDir = this.beamBelowDir(gBeamDir);
     const ghostSunMid = ghostPos.clone().add(gBeamDir.clone().multiplyScalar(gPx * 0.12));
     ghostSunMid.add(gBelowDir.multiplyScalar(gPx * 0.032));
     this.ghostSunDistLabel.position.copy(ghostSunMid);
@@ -3589,9 +3594,7 @@ export class CosmicMotionApp {
         const gpCamDist = this.camera.position.distanceTo(planetScenePos);
         const gpVFov = this.camera.fov * Math.PI / 180;
         const gpPx = gpCamDist * Math.tan(gpVFov / 2);
-        const gpCamRight = new THREE.Vector3().crossVectors(this.camera.up, gpBeamDir).normalize();
-        const gpBelowDir = new THREE.Vector3().crossVectors(gpBeamDir, gpCamRight).normalize();
-        if (gpBelowDir.dot(this.camera.up) > 0) gpBelowDir.negate();
+        const gpBelowDir = this.beamBelowDir(gpBeamDir);
         const mid = planetScenePos.clone().sub(gpBeamDir.clone().multiplyScalar(gpPx * 0.12));
         mid.add(gpBelowDir.multiplyScalar(gpPx * 0.032));
         gDistLabel.position.copy(mid);
