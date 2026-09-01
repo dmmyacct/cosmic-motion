@@ -2787,15 +2787,28 @@ export class CosmicMotionApp {
     this.hudCard.style.setProperty('--hud-color', color);
 
     // Body labels — fixed screen size, positioned by 3D projection
+    // Hide label for focused body (HUD card already shows it) and nav target (trip card)
+    const labelPositions: { x: number; y: number; name: string }[] = [];
     for (const [bodyName, el] of this.bodyLabels) {
-      if (!this.showLabels) { el.style.opacity = '0'; continue; }
+      if (!this.showLabels
+        || bodyName === this.currentBody
+        || (this.isNavigating && bodyName === this.navTargetBody)) {
+        el.style.opacity = '0'; continue;
+      }
       const pos = this.getBodyScenePos(bodyName);
       const screen = pos.clone().project(this.camera);
-      const behind = screen.z > 1;
-      if (behind) { el.style.opacity = '0'; continue; }
+      if (screen.z > 1) { el.style.opacity = '0'; continue; }
       const lx = (screen.x * 0.5 + 0.5) * w;
-      const ly = (-screen.y * 0.5 + 0.5) * h;
-      el.style.transform = `translate(${lx}px, ${ly - 18}px)`;
+      let ly = (-screen.y * 0.5 + 0.5) * h - 18;
+
+      // Stagger vertically if too close to an existing label
+      for (const other of labelPositions) {
+        if (Math.abs(lx - other.x) < 60 && Math.abs(ly - other.y) < 14) {
+          ly = other.y + 14;
+        }
+      }
+      labelPositions.push({ x: lx, y: ly, name: bodyName });
+      el.style.transform = `translate(${lx}px, ${ly}px)`;
       el.style.opacity = '1';
     }
   }
