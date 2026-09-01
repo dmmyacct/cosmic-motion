@@ -206,6 +206,10 @@ export class CosmicMotionApp {
   private posHdgEl!: HTMLElement;
   private posPitEl!: HTMLElement;
   private posFrameCounter = 0;
+  private snapOverlay!: HTMLElement;
+  private snapBtnEl!: HTMLButtonElement;
+  private activeSnapKey = '';
+  private lastPosFingerprint = '';
 
   async init(container: HTMLElement): Promise<void> {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -2230,12 +2234,11 @@ export class CosmicMotionApp {
     this.hudReticle.setAttribute('viewBox', '-50 -50 100 100');
     this.hudReticle.innerHTML = `
       <g class="cm-reticle-spin">
-        <path d="M 0,-40 A 40,40 0 0,1 34.64,-20" class="cm-reticle-arc"/>
-        <path d="M 34.64,20 A 40,40 0 0,1 0,40" class="cm-reticle-arc"/>
-        <path d="M -34.64,-20 A 40,40 0 0,1 0,-40" class="cm-reticle-arc" style="opacity:0.4"/>
-        <path d="M 0,40 A 40,40 0 0,1 -34.64,20" class="cm-reticle-arc" style="opacity:0.4"/>
+        <path d="M 0,-42 A 42,42 0 0,1 36.37,-21" class="cm-reticle-arc"/>
+        <path d="M 42,0 A 42,42 0 0,1 21,36.37" class="cm-reticle-arc"/>
+        <path d="M 0,42 A 42,42 0 0,1 -36.37,21" class="cm-reticle-arc" style="opacity:0.35"/>
+        <path d="M -42,0 A 42,42 0 0,1 -21,-36.37" class="cm-reticle-arc" style="opacity:0.35"/>
       </g>
-      <circle cx="0" cy="0" r="3" class="cm-reticle-dot"/>
     `;
     this.hudOverlay.appendChild(this.hudReticle);
 
@@ -2269,12 +2272,11 @@ export class CosmicMotionApp {
     this.moonHudReticle.setAttribute('viewBox', '-50 -50 100 100');
     this.moonHudReticle.innerHTML = `
       <g class="cm-reticle-spin">
-        <path d="M 0,-40 A 40,40 0 0,1 34.64,-20" class="cm-reticle-arc"/>
-        <path d="M 34.64,20 A 40,40 0 0,1 0,40" class="cm-reticle-arc"/>
-        <path d="M -34.64,-20 A 40,40 0 0,1 0,-40" class="cm-reticle-arc" style="opacity:0.4"/>
-        <path d="M 0,40 A 40,40 0 0,1 -34.64,20" class="cm-reticle-arc" style="opacity:0.4"/>
+        <path d="M 0,-42 A 42,42 0 0,1 36.37,-21" class="cm-reticle-arc"/>
+        <path d="M 42,0 A 42,42 0 0,1 21,36.37" class="cm-reticle-arc"/>
+        <path d="M 0,42 A 42,42 0 0,1 -36.37,21" class="cm-reticle-arc" style="opacity:0.35"/>
+        <path d="M -42,0 A 42,42 0 0,1 -21,-36.37" class="cm-reticle-arc" style="opacity:0.35"/>
       </g>
-      <circle cx="0" cy="0" r="2" class="cm-reticle-dot"/>
     `;
     this.hudOverlay.appendChild(this.moonHudReticle);
 
@@ -2330,8 +2332,15 @@ export class CosmicMotionApp {
         <span class="cm-pos-sun-dist"></span>
         <span class="cm-pos-sun-light"></span>
       </div>
+      <button class="cm-pos-snap-btn" title="Snapshot position to clipboard">⎘</button>
     `;
     container.appendChild(this.posIndicator);
+
+    this.snapBtnEl = this.posIndicator.querySelector('.cm-pos-snap-btn')! as HTMLButtonElement;
+    this.snapBtnEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.snapshotPosition();
+    });
 
     this.posXEl = this.posIndicator.querySelector('[data-pos="x"]')!;
     this.posYEl = this.posIndicator.querySelector('[data-pos="y"]')!;
@@ -2342,6 +2351,77 @@ export class CosmicMotionApp {
     this.posPitEl = this.posIndicator.querySelector('[data-pos="pit"]')!;
     this.posSunDistEl = this.posIndicator.querySelector('.cm-pos-sun-dist')!;
     this.posSunLightEl = this.posIndicator.querySelector('.cm-pos-sun-light')!;
+
+    this.snapOverlay = document.createElement('div');
+    this.snapOverlay.className = 'cm-snap-overlay';
+    this.snapOverlay.innerHTML = `
+      <div class="cm-snap-key"></div>
+      <div class="cm-snap-label">Position snapshot copied</div>
+    `;
+    document.body.appendChild(this.snapOverlay);
+  }
+
+  private snapshotPosition(): void {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const rng = () => chars[(Math.random() * chars.length) | 0];
+    let raw = '';
+    for (let i = 0; i < 6; i++) raw += rng();
+    const key = raw.slice(0, 3) + '-' + raw.slice(3);
+    this.activeSnapKey = key;
+
+    const x = this.posXEl.textContent || '';
+    const y = this.posYEl.textContent || '';
+    const z = this.posZEl.textContent || '';
+    const nearest = this.posNearestEl.querySelector('.cm-pos-body-name')?.textContent || '';
+    const nearestDist = this.posNearestEl.querySelector('.cm-pos-body-dist')?.textContent || '';
+    const hdg = this.posHdgEl.textContent || '';
+    const pit = this.posPitEl.textContent || '';
+    const facing = this.posFacingEl.querySelector('.cm-pos-facing-name')?.textContent || '';
+    const sunDist = this.posSunDistEl.textContent || '';
+    const sunLight = this.posSunLightEl.textContent || '';
+    const date = new Date().toISOString();
+
+    const clipText = [
+      `[CM-${key}]`,
+      `Date: ${date}`,
+      `Position: X ${x}  Y ${y}  Z ${z}`,
+      `Nearest: ${nearest} @ ${nearestDist}`,
+      `Heading: HDG ${hdg}  PIT ${pit}`,
+      `Facing: ${facing}`,
+      `Sun: ${sunDist} (${sunLight})`,
+    ].join('\n');
+
+    const copyFallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = clipText;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(clipText).catch(copyFallback);
+    } else {
+      copyFallback();
+    }
+
+    this.snapBtnEl.textContent = key;
+    this.snapBtnEl.classList.add('cm-pos-snap-active');
+
+    const keyEl = this.snapOverlay.querySelector('.cm-snap-key')!;
+    keyEl.textContent = `CM-${key}`;
+    this.snapOverlay.classList.remove('cm-snap-show');
+    void this.snapOverlay.offsetWidth;
+    this.snapOverlay.classList.add('cm-snap-show');
+  }
+
+  private resetSnapshot(): void {
+    if (!this.activeSnapKey) return;
+    this.activeSnapKey = '';
+    this.snapBtnEl.textContent = '⎘';
+    this.snapBtnEl.classList.remove('cm-pos-snap-active');
   }
 
   private updateHUD(): void {
@@ -2382,10 +2462,29 @@ export class CosmicMotionApp {
     const trueR = this.bodyTrueRadius(this.currentBody);
     const camDist = this.camera.position.distanceTo(bodyPos);
     const effR = this.effectiveRadius(trueR, camDist);
-    const angularSize = camDist > 0.01 ? effR / camDist : 0;
-    const pixelRadius = angularSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
-    const reticleSize = Math.max(60, pixelRadius * 2.6 + 40);
+    const hasAtmo = this.currentBody === 'Earth' || this.currentBody === 'Venus' ||
+      this.currentBody === 'Mars' || this.currentBody === 'Jupiter' ||
+      this.currentBody === 'Saturn' || this.currentBody === 'Uranus' || this.currentBody === 'Neptune';
+    const visR = effR * (hasAtmo ? 1.15 : 1.06);
+    const camRight = new THREE.Vector3();
+    this.camera.getWorldDirection(camRight);
+    camRight.cross(this.camera.up).normalize();
+    const edgePt = bodyPos.clone().add(camRight.multiplyScalar(visR));
+    const edgeScreen = edgePt.clone().project(this.camera);
+    const edgeSx = (edgeScreen.x * 0.5 + 0.5) * w;
+    const edgeSy = (-edgeScreen.y * 0.5 + 0.5) * h;
+    const pixelRadius = Math.sqrt((edgeSx - sx) ** 2 + (edgeSy - sy) ** 2);
+    const gap = Math.max(14, Math.min(50, 12 + pixelRadius * 0.05));
+    const reticleSize = Math.max(56, (pixelRadius + gap) * (100 / 42));
     const halfR = reticleSize / 2;
+    const bodyFill = pixelRadius / Math.min(w, h);
+    if (bodyFill > 1.5) {
+      this.hudReticle.style.opacity = '0';
+    } else if (bodyFill > 1.0) {
+      this.hudReticle.style.opacity = String(1 - (bodyFill - 1.0) / 0.5);
+    } else {
+      this.hudReticle.style.opacity = '';
+    }
     this.hudReticle.style.width = `${reticleSize}px`;
     this.hudReticle.style.height = `${reticleSize}px`;
     this.hudReticle.style.transform = `translate(${sx - halfR}px, ${sy - halfR}px)`;
@@ -2518,9 +2617,25 @@ export class CosmicMotionApp {
     // Reticle sizing — uses perspective-faithful effective radius
     const camDist = this.camera.position.distanceTo(moonWorldPos);
     const moonEffR = this.effectiveRadius(MOON_TRUE_R, camDist);
-    const angSize = camDist > 0.01 ? moonEffR / camDist : 0;
-    const pixR = angSize * h * 0.5 / Math.tan(this.camera.fov * Math.PI / 360);
-    const rSize = Math.max(40, pixR * 2.6 + 30);
+    const moonVisR = moonEffR * 1.05;
+    const moonCamRight = new THREE.Vector3();
+    this.camera.getWorldDirection(moonCamRight);
+    moonCamRight.cross(this.camera.up).normalize();
+    const moonEdgePt = moonWorldPos.clone().add(moonCamRight.clone().multiplyScalar(moonVisR));
+    const moonEdgeScreen = moonEdgePt.clone().project(this.camera);
+    const moonEdgeSx = (moonEdgeScreen.x * 0.5 + 0.5) * w;
+    const moonEdgeSy = (-moonEdgeScreen.y * 0.5 + 0.5) * h;
+    const pixR = Math.sqrt((moonEdgeSx - mx) ** 2 + (moonEdgeSy - my) ** 2);
+    const moonGap = Math.max(10, Math.min(32, 8 + pixR * 0.04));
+    const rSize = Math.max(40, (pixR + moonGap) * (100 / 42));
+    const moonBodyFill = pixR / Math.min(w, h);
+    if (moonBodyFill > 1.5) {
+      this.moonHudReticle.style.opacity = '0';
+    } else if (moonBodyFill > 1.0) {
+      this.moonHudReticle.style.opacity = String(1 - (moonBodyFill - 1.0) / 0.5);
+    } else {
+      this.moonHudReticle.style.opacity = '';
+    }
     const halfR = rSize / 2;
     this.moonHudReticle.style.width = `${rSize}px`;
     this.moonHudReticle.style.height = `${rSize}px`;
@@ -2689,6 +2804,17 @@ export class CosmicMotionApp {
       const m = Math.floor(lightSec / 60);
       const s = Math.round(lightSec % 60);
       this.posSunLightEl.textContent = m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+    }
+
+    if (this.activeSnapKey) {
+      const fp = `${auX.toFixed(3)}|${auY.toFixed(3)}|${auZ.toFixed(3)}|${hdgDeg.toFixed(0)}|${pitDeg.toFixed(0)}`;
+      if (this.lastPosFingerprint && fp !== this.lastPosFingerprint) {
+        this.resetSnapshot();
+      }
+      this.lastPosFingerprint = fp;
+    } else {
+      const fp = `${auX.toFixed(3)}|${auY.toFixed(3)}|${auZ.toFixed(3)}|${hdgDeg.toFixed(0)}|${pitDeg.toFixed(0)}`;
+      this.lastPosFingerprint = fp;
     }
   }
 
