@@ -63,6 +63,7 @@ export interface UIUpdateData {
   earthOrbitPeriodDays?: number;
   earthOrbitPercent?: number;
   currentBody?: string;
+  moonAngle?: number;
 }
 
 const AU_KM = 149597870.7;
@@ -490,14 +491,20 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
   function showTooltip(name: string) {
     tooltipName.textContent = name;
-    const data = currentOrbitData.get(name);
-    if (data) {
-      const periodStr = data.periodDays >= 365
-        ? `${(data.periodDays / 365.25).toFixed(1)} yr orbit`
-        : `${Math.round(data.periodDays)} day orbit`;
-      tooltipInfo.textContent = `${periodStr}  ·  Day ${Math.round(data.dayInOrbit).toLocaleString()}  ·  ${data.percentComplete.toFixed(1)}%`;
+    if (name === 'Moon') {
+      tooltipInfo.textContent = '27.3 day orbit  ·  Click to navigate';
+    } else if (name === 'Earth' && earthDrillActive) {
+      tooltipInfo.textContent = 'Click to return to Solar System';
     } else {
-      tooltipInfo.textContent = '';
+      const data = currentOrbitData.get(name);
+      if (data) {
+        const periodStr = data.periodDays >= 365
+          ? `${(data.periodDays / 365.25).toFixed(1)} yr orbit`
+          : `${Math.round(data.periodDays)} day orbit`;
+        tooltipInfo.textContent = `${periodStr}  ·  Day ${Math.round(data.dayInOrbit).toLocaleString()}  ·  ${data.percentComplete.toFixed(1)}%`;
+      } else {
+        tooltipInfo.textContent = '';
+      }
     }
     tooltip.style.opacity = '1';
   }
@@ -584,28 +591,276 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     planetDots.set(planet.name, dot);
 
     // Interaction
-    group.addEventListener('click', () => callbacks.onNavigate(planet.name));
+    if (planet.name === 'Earth') group.classList.add('cm-nav-earth-orbit');
+    group.addEventListener('click', () => {
+      if (planet.name === 'Earth' && earthDrillActive) return;
+      callbacks.onNavigate(planet.name);
+    });
     group.addEventListener('mouseenter', () => {
+      if (earthDrillActive && planet.name !== 'Earth') return;
       group.classList.add('cm-nav-hover');
       showTooltip(planet.name);
       callbacks.onHoverBody(planet.name);
+      if (planet.name === 'Earth' && !earthDrillActive) {
+        group.classList.add('cm-nav-earth-charging');
+        earthHoverTimer = setTimeout(() => enterEarthDrillDown(), EARTH_DRILL_DELAY);
+      }
+      if (earthDrillActive && earthDrillExitTimer) {
+        clearTimeout(earthDrillExitTimer);
+        earthDrillExitTimer = null;
+      }
     });
     group.addEventListener('mouseleave', () => {
       group.classList.remove('cm-nav-hover');
-      hideTooltip();
-      callbacks.onHoverBody(null);
+      group.classList.remove('cm-nav-earth-charging');
+      if (!earthDrillActive) {
+        hideTooltip();
+        callbacks.onHoverBody(null);
+      }
+      if (earthHoverTimer) {
+        clearTimeout(earthHoverTimer);
+        earthHoverTimer = null;
+      }
     });
 
     svg.appendChild(group);
   }
 
+  // ── Earth Drill-Down State ──
+  let earthDrillActive = false;
+  let earthHoverTimer: ReturnType<typeof setTimeout> | null = null;
+  let earthDrillExitTimer: ReturnType<typeof setTimeout> | null = null;
+  let enteringDrillDown = false;
+  const EARTH_DRILL_DELAY = 800;
+  const EARTH_DRILL_EXIT_DELAY = 1500;
+  let lastEarthAngle = 0;
+  let lastMoonAngle = 0;
+  let earthDotAnimFrame = 0;
+
+  // ── Moon drill-down SVG elements ──
+  const MOON_ORBIT_R = 35;
+
+  const moonOrbitGroup = document.createElementNS(svgNS, 'g');
+  moonOrbitGroup.setAttribute('class', 'cm-nav-moon-orbit-group');
+  moonOrbitGroup.style.cursor = 'pointer';
+
+  const moonHitRing = document.createElementNS(svgNS, 'circle');
+  moonHitRing.setAttribute('cx', '0');
+  moonHitRing.setAttribute('cy', '0');
+  moonHitRing.setAttribute('r', String(MOON_ORBIT_R));
+  moonHitRing.setAttribute('class', 'cm-nav-hit-ring');
+  moonOrbitGroup.appendChild(moonHitRing);
+
+  const moonOrbitRing = document.createElementNS(svgNS, 'circle');
+  moonOrbitRing.setAttribute('cx', '0');
+  moonOrbitRing.setAttribute('cy', '0');
+  moonOrbitRing.setAttribute('r', String(MOON_ORBIT_R));
+  moonOrbitRing.setAttribute('class', 'cm-nav-orbit-ring cm-nav-moon-ring');
+  moonOrbitGroup.appendChild(moonOrbitRing);
+
+  const moonTextPathId = 'nav-text-path-moon';
+  const moonTextR = MOON_ORBIT_R + 1.5;
+  const moonTextPathEl = document.createElementNS(svgNS, 'path');
+  moonTextPathEl.setAttribute('id', moonTextPathId);
+  moonTextPathEl.setAttribute('d',
+    `M ${-moonTextR},0 A ${moonTextR},${moonTextR} 0 0 1 ${moonTextR},0`);
+  moonTextPathEl.setAttribute('fill', 'none');
+  defs.appendChild(moonTextPathEl);
+
+  const moonLabelText = document.createElementNS(svgNS, 'text');
+  moonLabelText.setAttribute('class', 'cm-nav-curved-label cm-nav-moon-label');
+  const moonTp = document.createElementNS(svgNS, 'textPath');
+  moonTp.setAttribute('href', `#${moonTextPathId}`);
+  moonTp.setAttribute('startOffset', '50%');
+  moonTp.setAttribute('text-anchor', 'middle');
+  moonTp.textContent = 'Moon';
+  moonLabelText.appendChild(moonTp);
+  moonOrbitGroup.appendChild(moonLabelText);
+
+  const moonDot = document.createElementNS(svgNS, 'circle');
+  moonDot.setAttribute('r', '2.5');
+  moonDot.setAttribute('class', 'cm-nav-planet-dot cm-nav-moon-dot');
+  moonDot.setAttribute('fill', '#b0b0aa');
+  moonDot.setAttribute('cx', String(MOON_ORBIT_R));
+  moonDot.setAttribute('cy', '0');
+  moonOrbitGroup.appendChild(moonDot);
+
+  svg.appendChild(moonOrbitGroup);
+
+  moonOrbitGroup.addEventListener('click', () => {
+    if (earthDrillActive) callbacks.onNavigate('Moon');
+  });
+  moonOrbitGroup.addEventListener('mouseenter', () => {
+    if (!earthDrillActive) return;
+    moonOrbitGroup.classList.add('cm-nav-hover');
+    showTooltip('Moon');
+    callbacks.onHoverBody('Moon');
+    if (earthDrillExitTimer) {
+      clearTimeout(earthDrillExitTimer);
+      earthDrillExitTimer = null;
+    }
+  });
+  moonOrbitGroup.addEventListener('mouseleave', () => {
+    moonOrbitGroup.classList.remove('cm-nav-hover');
+    if (earthDrillActive) {
+      showTooltip('Earth');
+    } else {
+      hideTooltip();
+    }
+    callbacks.onHoverBody(null);
+  });
+
+  // Earth glow ring (visible during drill-down)
+  const earthGlowRing = document.createElementNS(svgNS, 'circle');
+  earthGlowRing.setAttribute('cx', '0');
+  earthGlowRing.setAttribute('cy', '0');
+  earthGlowRing.setAttribute('r', '8');
+  earthGlowRing.setAttribute('class', 'cm-nav-earth-glow');
+  svg.appendChild(earthGlowRing);
+
+  // Earth center hit area (click to return from drill-down)
+  const earthCenterHit = document.createElementNS(svgNS, 'circle');
+  earthCenterHit.setAttribute('cx', '0');
+  earthCenterHit.setAttribute('cy', '0');
+  earthCenterHit.setAttribute('r', '12');
+  earthCenterHit.setAttribute('class', 'cm-nav-earth-center-hit');
+  earthCenterHit.style.cursor = 'pointer';
+  svg.appendChild(earthCenterHit);
+
+  earthCenterHit.addEventListener('click', () => {
+    if (earthDrillActive) {
+      exitEarthDrillDown();
+      callbacks.onNavigate('Earth');
+    }
+  });
+  earthCenterHit.addEventListener('mouseenter', () => {
+    if (!earthDrillActive) return;
+    showTooltip('Earth');
+    if (earthDrillExitTimer) {
+      clearTimeout(earthDrillExitTimer);
+      earthDrillExitTimer = null;
+    }
+  });
+
+  // Back label
+  const backText = document.createElementNS(svgNS, 'text');
+  backText.setAttribute('class', 'cm-nav-back-text');
+  backText.setAttribute('x', '0');
+  backText.setAttribute('y', '82');
+  backText.setAttribute('text-anchor', 'middle');
+  backText.textContent = '\u2190 Solar System';
+  backText.style.cursor = 'pointer';
+  svg.appendChild(backText);
+  backText.addEventListener('click', () => {
+    if (earthDrillActive) exitEarthDrillDown();
+  });
+
+  // Drill-down animation
+  function animateEarthDotTo(targetCx: number, targetCy: number, targetR: number,
+    duration: number, onDone?: () => void) {
+    const earthDot = planetDots.get('Earth')!;
+    const startCx = parseFloat(earthDot.getAttribute('cx')!);
+    const startCy = parseFloat(earthDot.getAttribute('cy')!);
+    const startR = parseFloat(earthDot.getAttribute('r')!);
+    const startTime = performance.now();
+    cancelAnimationFrame(earthDotAnimFrame);
+
+    function step() {
+      const elapsed = performance.now() - startTime;
+      const t = Math.min(1, elapsed / duration);
+      const ease = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      earthDot.setAttribute('cx', String(startCx + (targetCx - startCx) * ease));
+      earthDot.setAttribute('cy', String(startCy + (targetCy - startCy) * ease));
+      earthDot.setAttribute('r', String(startR + (targetR - startR) * ease));
+      if (t < 1) {
+        earthDotAnimFrame = requestAnimationFrame(step);
+      } else if (onDone) {
+        onDone();
+      }
+    }
+    earthDotAnimFrame = requestAnimationFrame(step);
+  }
+
+  function enterEarthDrillDown() {
+    if (earthDrillActive) return;
+    earthDrillActive = true;
+    enteringDrillDown = true;
+    earthHoverTimer = null;
+    orbitGroups.get('Earth')?.classList.remove('cm-nav-earth-charging');
+
+    navWrapper.classList.add('cm-nav-drilldown');
+    callbacks.onNavigate('Earth');
+    enteringDrillDown = false;
+
+    animateEarthDotTo(0, 0, 5, 600);
+
+    setTimeout(() => {
+      if (earthDrillActive) navWrapper.classList.add('cm-nav-drilldown-ready');
+    }, 350);
+
+    moonDot.setAttribute('cx', String(MOON_ORBIT_R * Math.cos(lastMoonAngle)));
+    moonDot.setAttribute('cy', String(-MOON_ORBIT_R * Math.sin(lastMoonAngle)));
+
+    showTooltip('Earth');
+  }
+
+  function exitEarthDrillDown() {
+    if (!earthDrillActive) return;
+    earthDrillActive = false;
+    if (earthDrillExitTimer) {
+      clearTimeout(earthDrillExitTimer);
+      earthDrillExitTimer = null;
+    }
+    cancelAnimationFrame(earthDotAnimFrame);
+
+    navWrapper.classList.remove('cm-nav-drilldown-ready');
+
+    const earthIdx = NAV_PLANETS.findIndex(p => p.name === 'Earth');
+    const r = RING_RADII[earthIdx];
+    const cx = r * Math.cos(lastEarthAngle);
+    const cy = -r * Math.sin(lastEarthAngle);
+    animateEarthDotTo(cx, cy, 2, 450, () => {
+      navWrapper.classList.remove('cm-nav-drilldown');
+    });
+
+    hideTooltip();
+    callbacks.onHoverBody(null);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && earthDrillActive) exitEarthDrillDown();
+  });
+
+  navWrapper.addEventListener('mouseleave', () => {
+    if (earthHoverTimer) {
+      clearTimeout(earthHoverTimer);
+      earthHoverTimer = null;
+    }
+    if (earthDrillActive && !earthDrillExitTimer) {
+      earthDrillExitTimer = setTimeout(() => exitEarthDrillDown(), EARTH_DRILL_EXIT_DELAY);
+    }
+  });
+  navWrapper.addEventListener('mouseenter', () => {
+    if (earthDrillExitTimer) {
+      clearTimeout(earthDrillExitTimer);
+      earthDrillExitTimer = null;
+    }
+  });
+
   function updateNavWidget(
     angles?: { name: string; angle: number }[],
     orbits?: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[],
     current?: string,
+    moonAngle?: number,
   ) {
     if (angles) {
       for (const { name, angle } of angles) {
+        if (name === 'Earth') {
+          lastEarthAngle = angle;
+          if (earthDrillActive) continue;
+        }
         const dot = planetDots.get(name);
         if (!dot) continue;
         const idx = NAV_PLANETS.findIndex(p => p.name === name);
@@ -618,6 +873,13 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     if (orbits) {
       for (const o of orbits) {
         currentOrbitData.set(o.name, { periodDays: o.periodDays, dayInOrbit: o.dayInOrbit, percentComplete: o.percentComplete });
+      }
+    }
+    if (moonAngle !== undefined) {
+      lastMoonAngle = moonAngle;
+      if (earthDrillActive) {
+        moonDot.setAttribute('cx', String(MOON_ORBIT_R * Math.cos(moonAngle)));
+        moonDot.setAttribute('cy', String(-MOON_ORBIT_R * Math.sin(moonAngle)));
       }
     }
     if (current && current !== activeHighlight) {
@@ -732,15 +994,21 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
         tableWrap.innerHTML = html;
       }
 
-      updateNavWidget(data.planetAngles, data.planetOrbits, data.currentBody);
+      updateNavWidget(data.planetAngles, data.planetOrbits, data.currentBody, data.moonAngle);
     },
 
     updateNav(
       angles: { name: string; angle: number }[],
       orbits: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[],
       current: string,
+      moonAngle?: number,
     ) {
-      updateNavWidget(angles, orbits, current);
+      updateNavWidget(angles, orbits, current, moonAngle);
+    },
+
+    exitDrillDown() {
+      if (enteringDrillDown) return;
+      exitEarthDrillDown();
     },
 
     tickPlayback() {

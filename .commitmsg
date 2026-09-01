@@ -1,6 +1,7 @@
-Terminator lines — day/night boundary for all bodies
+Earth drill-down navigation — hover to explore Moon via nav widget
 
-Add toggleable terminator lines (◐ button, default off) showing the
-exact sunlight boundary on Earth, Moon, and all planets. Lines orient
-perpendicular to each body's sun direction and update with time
-progression. Always pre-oriented so they're correct when toggled on.
+Hold hover on Earth's orbit ring in the nav widget for 800ms to enter
+drill-down mode: Earth animates to center, Moon orbit appears with a
+clickable Moon dot. Click Moon to fly the camera there with full HUD
+support. Return via Earth center click, back label, Escape, or mouse
+leave. Smooth choreographed transitions throughout.

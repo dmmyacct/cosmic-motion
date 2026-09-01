@@ -1266,6 +1266,8 @@ export class CosmicMotionApp {
   navigateToBody(bodyName: string): void {
     if (bodyName === this.currentBody || this.isNavigating) return;
 
+    if (bodyName !== 'Moon') this.ui.exitDrillDown();
+
     this.flightLocked = true;
     this.flightMouseDown = false;
     this.flightKeys = {};
@@ -1286,7 +1288,9 @@ export class CosmicMotionApp {
 
     const viewDist = bodyName === 'Sun'
       ? Math.max(trueR * 8, trueR * 5)
-      : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
+      : bodyName === 'Moon'
+        ? MOON_DIST * 1.5
+        : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
 
     this.navEndCamPos.copy(targetPos)
       .add(sunDir.clone().multiplyScalar(-viewDist))
@@ -2470,6 +2474,8 @@ export class CosmicMotionApp {
       this.sunMesh.getWorldPosition(bodyPos);
     } else if (this.currentBody === 'Earth') {
       this.earthGroup.getWorldPosition(bodyPos);
+    } else if (this.currentBody === 'Moon') {
+      this.moonMesh.getWorldPosition(bodyPos);
     } else {
       const grp = this.planetGroups.get(this.currentBody);
       if (grp) grp.getWorldPosition(bodyPos);
@@ -2563,7 +2569,9 @@ export class CosmicMotionApp {
     dotCard.setAttribute('cy', String(cardAnchorY));
 
     // Color theming
-    const color = this.currentBody === 'Sun' ? '#ffd54f' : (hudPlanet?.color ?? '#ffffff');
+    const color = this.currentBody === 'Sun' ? '#ffd54f'
+      : this.currentBody === 'Moon' ? '#b0b0aa'
+      : (hudPlanet?.color ?? '#ffffff');
     this.hudReticle.style.setProperty('--hud-color', color);
     this.hudLine.style.setProperty('--hud-color', color);
     this.hudCard.style.setProperty('--hud-color', color);
@@ -2572,8 +2580,8 @@ export class CosmicMotionApp {
   private updateHUDContent(): void {
     const name = this.currentBody;
     const planet = PLANETS.find(p => p.name === name);
-    const symbol = name === 'Sun' ? '☉' : (planet?.symbol ?? '');
-    const color = name === 'Sun' ? '#ffd54f' : (planet?.color ?? '#ffffff');
+    const symbol = name === 'Sun' ? '☉' : name === 'Moon' ? '☽' : (planet?.symbol ?? '');
+    const color = name === 'Sun' ? '#ffd54f' : name === 'Moon' ? '#b0b0aa' : (planet?.color ?? '#ffffff');
 
     const nameEl = this.hudCard.querySelector('.cm-hud-name')!;
     nameEl.innerHTML = `<span class="cm-hud-symbol" style="color:${color}">${symbol}</span> ${name}`;
@@ -2586,7 +2594,32 @@ export class CosmicMotionApp {
     const statsEl = this.hudCard.querySelector('.cm-hud-stats')!;
     const name = this.currentBody;
     const planet = PLANETS.find(p => p.name === name);
-    if (!planet && name !== 'Sun') return;
+    if (!planet && name !== 'Sun' && name !== 'Moon') return;
+
+    if (name === 'Moon') {
+      const sunV = new THREE.Vector3(
+        -this.data.earthPos[0], -this.data.earthPos[1], -this.data.earthPos[2],
+      ).normalize();
+      const moonV = new THREE.Vector3(...this.data.moonDir);
+      const phaseAngle = sunV.angleTo(moonV);
+      const crossV = new THREE.Vector3().crossVectors(sunV, moonV);
+      const waxing = crossV.z > 0;
+      const phaseDeg = phaseAngle * 180 / Math.PI;
+      const phaseName = phaseDeg > 175 ? 'New Moon' : phaseDeg < 5 ? 'Full Moon'
+        : waxing
+          ? (phaseDeg > 95 ? 'Wax. Crescent' : phaseDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
+          : (phaseDeg < 85 ? 'Wan. Gibbous' : phaseDeg < 95 ? '3rd Quarter' : 'Wan. Crescent');
+      const illum = ((1 + Math.cos(phaseAngle)) / 2 * 100).toFixed(1);
+      statsEl.innerHTML = `
+        <div class="cm-hs"><span class="cm-hsl">Earth dist</span><span class="cm-hsv">${Math.round(this.data.moonDistKm).toLocaleString()} km</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Light time</span><span class="cm-hsv">${(this.data.moonDistKm / 299792.458).toFixed(1)}s</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Phase</span><span class="cm-hsv">${phaseName}</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Illumination</span><span class="cm-hsv">${illum}%</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Orbital period</span><span class="cm-hsv">27.3 days</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Axial tilt</span><span class="cm-hsv">6.7°</span></div>
+      `;
+      return;
+    }
 
     if (name === 'Sun') {
       statsEl.innerHTML = `
@@ -3041,6 +3074,8 @@ export class CosmicMotionApp {
     const cross = new THREE.Vector3().crossVectors(sunV, moonV);
     const moonPhaseWaxing = cross.z > 0;
 
+    const moonAngle = Math.atan2(this.data.moonDir[1], this.data.moonDir[0]);
+
     // Moon
     const moonPos = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
     this.moonMesh.position.copy(moonPos);
@@ -3095,6 +3130,7 @@ export class CosmicMotionApp {
       earthOrbitPeriodDays: earthOrbitPeriod,
       earthOrbitPercent: earthOrbitPercent,
       currentBody: this.currentBody,
+      moonAngle,
     });
     this.updateGhost();
   }
@@ -3137,7 +3173,8 @@ export class CosmicMotionApp {
       const group = this.planetGroups.get(pp.name);
       if (group) group.position.copy(scenePos);
     }
-    this.ui.updateNav(ghostAngles, ghostOrbits, this.currentBody);
+    const ghostMoonAngle = Math.atan2(ghostData.moonDir[1], ghostData.moonDir[0]);
+    this.ui.updateNav(ghostAngles, ghostOrbits, this.currentBody, ghostMoonAngle);
 
     // Ghost Earth — heliocentric position + same galactic drift
     const ghostPos = eclToThree(ghostData.earthPos).multiplyScalar(AU_SCENE).add(ghostDrift.clone());

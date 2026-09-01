@@ -1055,3 +1055,146 @@ canvas { display: block; }
   color: rgba(251, 191, 36, 0.9);
   text-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
 }
+
+/* ── Earth Drill-Down Navigation ── */
+
+.cm-nav-orbit-group {
+  transition: opacity 0.4s ease;
+}
+
+/* Moon orbit group — hidden by default, revealed in drill-down */
+.cm-nav-moon-orbit-group {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.cm-nav-moon-ring {
+  stroke: rgba(176, 176, 170, 0.15) !important;
+  stroke-width: 0.4 !important;
+}
+
+.cm-nav-moon-dot {
+  filter: drop-shadow(0 0 3px rgba(176, 176, 170, 0.5));
+  transition: all 0.3s ease;
+}
+
+.cm-nav-moon-orbit-group.cm-nav-hover .cm-nav-moon-ring {
+  stroke: rgba(176, 176, 170, 0.5) !important;
+  stroke-width: 0.8 !important;
+}
+
+.cm-nav-moon-orbit-group.cm-nav-hover .cm-nav-moon-dot {
+  filter: drop-shadow(0 0 6px rgba(176, 176, 170, 0.8)) drop-shadow(0 0 12px rgba(176, 176, 170, 0.4));
+}
+
+.cm-nav-moon-orbit-group.cm-nav-hover .cm-nav-moon-label {
+  fill: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Earth glow ring — visible during drill-down */
+.cm-nav-earth-glow {
+  fill: none;
+  stroke: rgba(79, 195, 247, 0);
+  stroke-width: 0.5;
+  pointer-events: none;
+  transition: all 0.5s ease;
+}
+
+/* Earth center hit area — only active during drill-down */
+.cm-nav-earth-center-hit {
+  fill: transparent;
+  pointer-events: none;
+}
+
+/* Back label */
+.cm-nav-back-text {
+  font-size: 4px;
+  fill: rgba(255, 255, 255, 0);
+  font-family: var(--font);
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  transition: fill 0.5s ease;
+}
+
+/* Charging animation — visual cue during hover delay before drill-down */
+.cm-nav-earth-charging .cm-nav-planet-dot {
+  animation: earthChargePulse 0.8s ease-in-out forwards;
+}
+
+@keyframes earthChargePulse {
+  0% { filter: drop-shadow(0 0 2px currentColor); }
+  100% { filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px rgba(79, 195, 247, 0.5)); }
+}
+
+/* ── Drill-down active states ── */
+
+.cm-nav-drilldown .cm-nav-sun {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.cm-nav-drilldown .cm-nav-orbit-group {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.cm-nav-drilldown .cm-nav-orbit-group.cm-nav-earth-orbit {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cm-nav-drilldown .cm-nav-earth-orbit .cm-nav-orbit-ring {
+  opacity: 0 !important;
+  transition: opacity 0.3s ease;
+}
+
+.cm-nav-drilldown .cm-nav-earth-orbit .cm-nav-curved-label {
+  fill: rgba(255, 255, 255, 0) !important;
+  transition: fill 0.3s ease;
+}
+
+.cm-nav-drilldown .cm-nav-earth-orbit .cm-nav-hit-ring {
+  pointer-events: none;
+}
+
+.cm-nav-drilldown .cm-nav-earth-orbit .cm-nav-planet-dot {
+  filter: drop-shadow(0 0 4px rgba(79, 195, 247, 0.6)) drop-shadow(0 0 10px rgba(79, 195, 247, 0.3));
+}
+
+.cm-nav-drilldown .cm-nav-earth-glow {
+  stroke: rgba(79, 195, 247, 0.15);
+  animation: earthGlowPulse 3s ease-in-out infinite;
+}
+
+@keyframes earthGlowPulse {
+  0%, 100% { stroke: rgba(79, 195, 247, 0.1); }
+  50% { stroke: rgba(79, 195, 247, 0.35); }
+}
+
+.cm-nav-drilldown .cm-nav-earth-center-hit {
+  pointer-events: auto;
+}
+
+.cm-nav-drilldown .cm-nav-back-text {
+  fill: rgba(255, 255, 255, 0.2);
+  pointer-events: auto;
+  transition: fill 0.5s ease;
+}
+
+.cm-nav-drilldown .cm-nav-back-text:hover {
+  fill: rgba(255, 255, 255, 0.6);
+}
+
+/* ── Drill-down ready — Moon elements visible ── */
+
+.cm-nav-drilldown-ready .cm-nav-moon-orbit-group {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cm-nav-drilldown-ready .cm-nav-moon-label {
+  fill: rgba(255, 255, 255, 0.3);
+}
