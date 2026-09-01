@@ -1350,16 +1350,15 @@ export class CosmicMotionApp {
     this.navDuration = Math.max(4.0, Math.min(20.0, baseDuration));
     this.controls.enabled = false;
 
-    const P2_END_SETUP = 0.22;
-    const P3_END_SETUP = 0.65;
+    const P2_END_SETUP = 0.40;
+    const P3_END_SETUP = 0.72;
     this.navTripDistKm = travelAU * AU_KM_VAL;
     const chargeSec = this.navDuration * (P3_END_SETUP - P2_END_SETUP);
     this.navTripSpeedC = this.navTripDistKm / Math.max(0.01, chargeSec) / 299792.458;
 
-    const etaSec = this.navDuration * (1 - P2_END_SETUP);
-    this.navTripEta = etaSec >= 10
-      ? `${etaSec.toFixed(0)}s`
-      : `${etaSec.toFixed(1)}s`;
+    this.navTripEta = chargeSec >= 10
+      ? `${chargeSec.toFixed(0)}s`
+      : `${chargeSec.toFixed(1)}s`;
 
     const destLabel = bodyName.toUpperCase();
     const distAU = travelAU;
@@ -2601,8 +2600,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-15%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 6.5);
+        // Fade out over the aim phase (0-35%)
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 3.0);
       }
     }
 
@@ -2657,11 +2656,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.15
-        ? Math.min(1, tg / 0.05)
-        : tg < 0.22
+      const lockVis = tg < 0.35
+        ? Math.min(1, tg / 0.08)
+        : tg < 0.40
           ? 1
-          : Math.max(0, 1 - (tg - 0.22) / 0.05);
+          : Math.max(0, 1 - (tg - 0.40) / 0.06);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -2689,29 +2688,29 @@ export class CosmicMotionApp {
       this.lockOnReticle.style.opacity = '0';
     }
 
-    // Trip card: fade in during lock-on, visible during charge, persist after arrival
+    // Trip card: fade in at lock-on, visible through charge, persist after arrival
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       let tripOpacity = 0;
-      if (tg >= 0.15 && tg < 0.22) {
-        tripOpacity = Math.min(1, (tg - 0.15) / 0.03);
-      } else if (tg >= 0.22 && tg < 0.90) {
+      if (tg >= 0.35 && tg < 0.40) {
+        tripOpacity = Math.min(1, (tg - 0.35) / 0.03);
+      } else if (tg >= 0.40) {
         tripOpacity = 1;
-      } else if (tg >= 0.90) {
-        tripOpacity = Math.max(0, 1 - (tg - 0.90) / 0.10);
       }
       this.tripCard.style.opacity = String(tripOpacity);
       this.navTripCardTimer = 3.0;
 
-      // Live countdown: update ETA during charge + sun-orient
-      if (tg >= 0.22) {
-        const remaining = Math.max(0, this.navDuration * (1 - tg));
-        const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
-        if (etaEl) {
-          etaEl.textContent = remaining >= 10
-            ? `${remaining.toFixed(0)}s`
-            : `${remaining.toFixed(1)}s`;
-        }
+      // Live countdown: ETA counts down during charge (travel to object)
+      const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
+      if (etaEl && tg >= 0.40 && tg < 0.72) {
+        const chargeProgress = (tg - 0.40) / (0.72 - 0.40);
+        const chargeTotalSec = this.navDuration * (0.72 - 0.40);
+        const remaining = Math.max(0, chargeTotalSec * (1 - chargeProgress));
+        etaEl.textContent = remaining >= 10
+          ? `${remaining.toFixed(0)}s`
+          : `${remaining.toFixed(1)}s`;
+      } else if (etaEl && tg >= 0.72) {
+        etaEl.textContent = 'ARRIVED';
       }
     } else if (this.navTripCardTimer > 0) {
       this.navTripCardTimer -= this._delta;
@@ -4086,10 +4085,10 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.15;  // aim phase ends (smooth tracking)
-      const P2_END = 0.22;  // lock-on + trip card phase ends (brief hold, show card)
-      const P3_END = 0.65;  // charge phase ends
-      // Phase 4: 0.65–1.00 — Sun orient
+      const P1_END = 0.35;  // aim: slow, dramatic pan to find the target
+      const P2_END = 0.40;  // lock-on: brief beat, trip card appears, then launch
+      const P3_END = 0.72;  // charge: the actual travel
+      // Phase 4: 0.72–1.00 — Sun orient
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {
@@ -4115,18 +4114,16 @@ export class CosmicMotionApp {
       const destPos = this.getBodyScenePos(this.navTargetBody);
 
       if (tGlobal < P1_END) {
-        // Phase 1 — Aim: exponential tracking with natural lag
-        // Starts slow, accelerates as it hones in — like a targeting computer
+        // Phase 1 — Aim: slow theatrical pan, camera rotates to find the target
+        // Smooth cubic ease that spends most of its time in slow drift
         const pt = tGlobal / P1_END;
-        const trackSpeed = 3.0 + pt * 8.0;
-        const alpha = 1 - Math.exp(-trackSpeed * delta);
-        this.controls.target.lerp(destPos, alpha);
+        const ease = pt * pt * (3 - 2 * pt); // smoothstep — slow start, slow end
+        this.controls.target.lerpVectors(this.navStartTarget, destPos, ease);
 
       } else if (tGlobal < P2_END) {
-        // Phase 2 — Lock-on: snap remaining aim, brief hold before launch
+        // Phase 2 — Lock-on: target acquired, brief dramatic hold
         const pt = (tGlobal - P1_END) / (P2_END - P1_END);
-        const lockAlpha = 1 - Math.exp(-12 * delta);
-        this.controls.target.lerp(destPos, lockAlpha);
+        this.controls.target.lerpVectors(this.controls.target, destPos, 0.15);
         this.navLockOnSpin = pt;
 
       } else if (tGlobal < P3_END) {
