@@ -1389,20 +1389,14 @@ export class CosmicMotionApp {
         ? `${this.navTripSpeedC.toFixed(1)}c`
         : `${this.navTripSpeedC.toFixed(2)}c`;
 
-    const destEl = this.tripCard.querySelector('.cm-trip-dest') as HTMLElement;
-    const distEl = this.tripCard.querySelector('.cm-trip-dist') as HTMLElement;
-    const speedEl = this.tripCard.querySelector('.cm-trip-speed') as HTMLElement;
-    const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
-    if (destEl) destEl.textContent = destLabel;
-    if (distEl) distEl.textContent = `${distAU.toFixed(2)} AU \u2014 ${distKmStr}`;
-    if (speedEl) speedEl.textContent = speedStr;
-    if (etaEl) etaEl.textContent = this.navTripEta;
-
-    const destPlanet = PLANETS.find(p => p.name === bodyName);
-    const tripColor = bodyName === 'Sun' ? '#ffd54f'
-      : bodyName === 'Moon' ? '#b0b0aa'
-      : (destPlanet?.color ?? '#ffffff');
-    this.tripCard.style.setProperty('--hud-color', tripColor);
+    const tripEl = this.hudCard.querySelector('.cm-hud-trip') as HTMLElement;
+    if (tripEl) {
+      tripEl.innerHTML = `
+        <div class="cm-hs"><span class="cm-hsl">Distance</span><span class="cm-hsv">${distAU.toFixed(2)} AU</span></div>
+        <div class="cm-hs"><span class="cm-hsl">Speed</span><span class="cm-hsv">${speedStr}</span></div>
+        <div class="cm-hs"><span class="cm-hsl">ETA</span><span class="cm-hsv cm-trip-eta">${this.navTripEta}</span></div>
+      `;
+    }
   }
 
   private setHoveredBody(name: string | null): void {
@@ -2402,13 +2396,7 @@ export class CosmicMotionApp {
 
     this.tripCard = document.createElement('div');
     this.tripCard.className = 'cm-trip-card';
-    this.tripCard.innerHTML = `
-      <div class="cm-trip-dest"></div>
-      <div class="cm-trip-stat"><span class="cm-trip-label">DIST</span><span class="cm-trip-value cm-trip-dist"></span></div>
-      <div class="cm-trip-stat"><span class="cm-trip-label">SPEED</span><span class="cm-trip-value cm-trip-speed"></span></div>
-      <div class="cm-trip-stat"><span class="cm-trip-label">ETA</span><span class="cm-trip-value cm-trip-eta"></span></div>
-    `;
-    this.hudOverlay.appendChild(this.tripCard);
+    this.tripCard.style.display = 'none';
 
     // Leader line SVG — full viewport, draws the elbow line
     this.hudLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2424,6 +2412,7 @@ export class CosmicMotionApp {
     this.hudCard.innerHTML = `
       <button class="cm-hud-close" title="Close">×</button>
       <div class="cm-hud-name"></div>
+      <div class="cm-hud-trip"></div>
       <div class="cm-hud-stats"></div>
     `;
     this.hudOverlay.appendChild(this.hudCard);
@@ -2732,36 +2721,47 @@ export class CosmicMotionApp {
       this.lockOnReticle.style.opacity = '0';
     }
 
-    // Trip card: fade in at lock-on, visible through charge, persist after arrival
-    if (this.isNavigating) {
-      const tg = Math.min(1, this.navTime / this.navDuration);
-      let tripOpacity = 0;
-      if (tg >= this.navP1 && tg < this.navP2) {
-        tripOpacity = Math.min(1, (tg - this.navP1) / (this.navP2 - this.navP1));
-      } else if (tg >= this.navP2) {
-        tripOpacity = 1;
-      }
-      this.tripCard.style.opacity = String(tripOpacity);
-      this.navTripCardTimer = 3.0;
+    // Trip info inside HUD card: show during navigation, persist briefly after arrival
+    const tripSection = this.hudCard.querySelector('.cm-hud-trip') as HTMLElement;
+    if (tripSection) {
+      if (this.isNavigating) {
+        const tg = Math.min(1, this.navTime / this.navDuration);
+        if (tg >= this.navP1) {
+          tripSection.classList.add('active');
+          tripSection.style.maxHeight = '80px';
+          tripSection.style.opacity = '1';
+        } else {
+          tripSection.classList.remove('active');
+          tripSection.style.maxHeight = '0';
+          tripSection.style.opacity = '0';
+        }
+        this.navTripCardTimer = 3.0;
 
-      // Live countdown: ETA counts down during charge (travel to object)
-      const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
-      if (etaEl && tg >= this.navP2 && tg < this.navP3) {
-        const chargeProgress = (tg - this.navP2) / (this.navP3 - this.navP2);
-        const chargeTotalSec = this.navDuration * (this.navP3 - this.navP2);
-        const remaining = Math.max(0, chargeTotalSec * (1 - chargeProgress));
-        etaEl.textContent = remaining >= 10
-          ? `${remaining.toFixed(0)}s`
-          : `${remaining.toFixed(1)}s`;
-      } else if (etaEl && tg >= this.navP3) {
-        etaEl.textContent = 'ARRIVED';
+        // Live countdown: ETA counts down during charge (travel to object)
+        const etaEl = tripSection.querySelector('.cm-trip-eta') as HTMLElement;
+        if (etaEl && tg >= this.navP2 && tg < this.navP3) {
+          const chargeProgress = (tg - this.navP2) / (this.navP3 - this.navP2);
+          const chargeTotalSec = this.navDuration * (this.navP3 - this.navP2);
+          const remaining = Math.max(0, chargeTotalSec * (1 - chargeProgress));
+          etaEl.textContent = remaining >= 10
+            ? `${remaining.toFixed(0)}s`
+            : `${remaining.toFixed(1)}s`;
+        } else if (etaEl && tg >= this.navP3) {
+          etaEl.textContent = 'ARRIVED';
+        }
+      } else if (this.navTripCardTimer > 0) {
+        this.navTripCardTimer -= this._delta;
+        const fade = Math.min(1, this.navTripCardTimer / 1.0);
+        tripSection.style.opacity = String(Math.max(0, fade));
+        if (this.navTripCardTimer <= 0) {
+          tripSection.classList.remove('active');
+          tripSection.style.maxHeight = '0';
+        }
+      } else {
+        tripSection.classList.remove('active');
+        tripSection.style.maxHeight = '0';
+        tripSection.style.opacity = '0';
       }
-    } else if (this.navTripCardTimer > 0) {
-      this.navTripCardTimer -= this._delta;
-      const fade = Math.min(1, this.navTripCardTimer / 1.0);
-      this.tripCard.style.opacity = String(Math.max(0, fade));
-    } else {
-      this.tripCard.style.opacity = '0';
     }
 
     // Card position — offset to upper-right of planet, clamped to viewport

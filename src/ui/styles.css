@@ -953,6 +953,24 @@ canvas { display: block; }
   margin-right: 2px;
 }
 
+.cm-hud-trip {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, opacity 0.4s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cm-hud-trip.active {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.cm-hud-trip .cm-hsv {
+  color: var(--hud-color, rgba(255, 255, 255, 0.85));
+}
+
 .cm-hud-stats {
   display: flex;
   flex-direction: column;
