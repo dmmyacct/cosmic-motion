@@ -2847,10 +2847,17 @@ export class CosmicMotionApp {
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len > 0.1) { dx /= len; dy /= len; } else { dx = 1; dy = 0; }
 
-        // Perpendicular pointing screen-down (positive y = down in screen coords)
+        // Perpendicular pointing screen-down, with downward bias for steep beams
         let px = -dy;
         let py = dx;
         if (py < 0) { px = -px; py = -py; }
+        // When the beam is steep, the perpendicular is mostly horizontal and
+        // can flip sides. Add a downward pull so the text always stays below.
+        const steepness = Math.abs(dy) / (Math.abs(dx) + Math.abs(dy) + 0.001);
+        py += steepness * 0.8;
+        const plen = Math.sqrt(px * px + py * py);
+        px /= plen;
+        py /= plen;
 
         // Anchor near the body, just under the beam, extending toward Sun
         const along = 25;
