@@ -2852,9 +2852,9 @@ export class CosmicMotionApp {
         let py = dx;
         if (py < 0) { px = -px; py = -py; }
 
-        // Position: slightly along beam toward Sun, then offset below
-        const along = 30;
-        const below = 14;
+        // Place the text well along the beam toward Sun, tight under the line
+        const along = 80;
+        const below = 5;
         const ix = bx + dx * along + px * below;
         const iy = by + dy * along + py * below;
 
