@@ -185,6 +185,7 @@ export class CosmicMotionApp {
   private navTripDistKm = 0;
   private navTripSpeedC = 0;
   private navTripEta = '';
+  private navTripCardTimer = 0;
   private tripCard!: HTMLElement;
   private lockOnReticle!: SVGSVGElement;
   private hudOverlay!: HTMLElement;
@@ -204,6 +205,7 @@ export class CosmicMotionApp {
   private moonSweep!: THREE.Group;
   private previousBody = 'Earth';
   private _earthScale = 1;
+  private _delta = 0;
   private posIndicator!: HTMLElement;
   private posXEl!: HTMLElement;
   private posYEl!: HTMLElement;
@@ -1348,13 +1350,13 @@ export class CosmicMotionApp {
     this.navDuration = Math.max(4.0, Math.min(20.0, baseDuration));
     this.controls.enabled = false;
 
-    const P2_END = 0.30;
-    const P3_END = 0.62;
+    const P2_END_SETUP = 0.22;
+    const P3_END_SETUP = 0.65;
     this.navTripDistKm = travelAU * AU_KM_VAL;
-    const chargeSec = this.navDuration * (P3_END - P2_END);
+    const chargeSec = this.navDuration * (P3_END_SETUP - P2_END_SETUP);
     this.navTripSpeedC = this.navTripDistKm / Math.max(0.01, chargeSec) / 299792.458;
 
-    const etaSec = this.navDuration * (1 - P2_END);
+    const etaSec = this.navDuration * (1 - P2_END_SETUP);
     this.navTripEta = etaSec >= 10
       ? `${etaSec.toFixed(0)}s`
       : `${etaSec.toFixed(1)}s`;
@@ -2599,8 +2601,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-18%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 5.5);
+        // Fade out over the aim phase (0-15%)
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 6.5);
       }
     }
 
@@ -2655,11 +2657,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.18
-        ? Math.min(1, tg / 0.06)
-        : tg < 0.30
+      const lockVis = tg < 0.15
+        ? Math.min(1, tg / 0.05)
+        : tg < 0.22
           ? 1
-          : Math.max(0, 1 - (tg - 0.30) / 0.05);
+          : Math.max(0, 1 - (tg - 0.22) / 0.05);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -2687,18 +2689,34 @@ export class CosmicMotionApp {
       this.lockOnReticle.style.opacity = '0';
     }
 
-    // Trip card: fade in during lock-on (18-30%), visible during charge (30-62%), fade out (62-67%)
+    // Trip card: fade in during lock-on, visible during charge, persist after arrival
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       let tripOpacity = 0;
-      if (tg >= 0.18 && tg < 0.30) {
-        tripOpacity = Math.min(1, (tg - 0.18) / 0.04);
-      } else if (tg >= 0.30 && tg < 0.62) {
+      if (tg >= 0.15 && tg < 0.22) {
+        tripOpacity = Math.min(1, (tg - 0.15) / 0.03);
+      } else if (tg >= 0.22 && tg < 0.90) {
         tripOpacity = 1;
-      } else if (tg >= 0.62 && tg < 0.67) {
-        tripOpacity = Math.max(0, 1 - (tg - 0.62) / 0.05);
+      } else if (tg >= 0.90) {
+        tripOpacity = Math.max(0, 1 - (tg - 0.90) / 0.10);
       }
       this.tripCard.style.opacity = String(tripOpacity);
+      this.navTripCardTimer = 3.0;
+
+      // Live countdown: update ETA during charge + sun-orient
+      if (tg >= 0.22) {
+        const remaining = Math.max(0, this.navDuration * (1 - tg));
+        const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
+        if (etaEl) {
+          etaEl.textContent = remaining >= 10
+            ? `${remaining.toFixed(0)}s`
+            : `${remaining.toFixed(1)}s`;
+        }
+      }
+    } else if (this.navTripCardTimer > 0) {
+      this.navTripCardTimer -= this._delta;
+      const fade = Math.min(1, this.navTripCardTimer / 1.0);
+      this.tripCard.style.opacity = String(Math.max(0, fade));
     } else {
       this.tripCard.style.opacity = '0';
     }
@@ -3959,6 +3977,7 @@ export class CosmicMotionApp {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     const delta = this.clock.getDelta();
+    this._delta = delta;
 
     if (this.needsDataUpdate) this.updateSceneData();
 
@@ -4067,10 +4086,10 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.18;  // aim phase ends
-      const P2_END = 0.30;  // lock-on + trip card phase ends
-      const P3_END = 0.62;  // charge phase ends
-      // Phase 4: 0.62–1.00 — Sun orient
+      const P1_END = 0.15;  // aim phase ends (smooth tracking)
+      const P2_END = 0.22;  // lock-on + trip card phase ends (brief hold, show card)
+      const P3_END = 0.65;  // charge phase ends
+      // Phase 4: 0.65–1.00 — Sun orient
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {
@@ -4096,16 +4115,18 @@ export class CosmicMotionApp {
       const destPos = this.getBodyScenePos(this.navTargetBody);
 
       if (tGlobal < P1_END) {
-        // Phase 1 — Aim: camera stays put, view drifts slowly toward target
+        // Phase 1 — Aim: exponential tracking with natural lag
+        // Starts slow, accelerates as it hones in — like a targeting computer
         const pt = tGlobal / P1_END;
-        const ease = pt * pt * pt * pt; // quartic — very slow start
-        this.controls.target.lerpVectors(this.navStartTarget, destPos, ease);
+        const trackSpeed = 3.0 + pt * 8.0;
+        const alpha = 1 - Math.exp(-trackSpeed * delta);
+        this.controls.target.lerp(destPos, alpha);
 
       } else if (tGlobal < P2_END) {
-        // Phase 2 — Lock-on: camera still stationary, finish aiming + reticle
+        // Phase 2 — Lock-on: snap remaining aim, brief hold before launch
         const pt = (tGlobal - P1_END) / (P2_END - P1_END);
-        // Finish the aim rotation smoothly during lock-on
-        this.controls.target.lerpVectors(this.controls.target, destPos, 0.12);
+        const lockAlpha = 1 - Math.exp(-12 * delta);
+        this.controls.target.lerp(destPos, lockAlpha);
         this.navLockOnSpin = pt;
 
       } else if (tGlobal < P3_END) {
