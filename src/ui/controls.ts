@@ -400,7 +400,6 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
 
   const flightBtn = timePanel.querySelector('.cm-flight-btn') as HTMLButtonElement;
   flightBtn.addEventListener('click', () => {
-    flightBtn.classList.toggle('active');
     callbacks.onToggleFlightMode();
   });
   flightBtn.addEventListener('mouseenter', () => callbacks.onFlightHover(true));

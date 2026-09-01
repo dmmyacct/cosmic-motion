@@ -211,19 +211,20 @@ export class CosmicMotionApp {
   private activeSnapKey = '';
   private lastPosFingerprint = '';
 
-  // Flight mode state
-  private flightMode = false;
+  // Flight — always-on 6DOF; "locked" orbits a body, any thrust breaks free
+  private flightLocked = true;
   private flightKeys: Record<string, boolean> = {};
   private flightSpeed = 1.0;
   private flightSpeedLevel = 5;
   private flightVelocity = new THREE.Vector3();
+  private flightQuat = new THREE.Quaternion();
   private flightMouseDown = false;
   private flightMousePrevX = 0;
   private flightMousePrevY = 0;
-  private flightYaw = 0;
-  private flightPitch = 0;
+  private flightNewton = false;
   private flightHintEl!: HTMLElement;
   private flightSpeedEl!: HTMLElement;
+  private flightNewtonEl!: HTMLElement;
   private flightHintTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(container: HTMLElement): Promise<void> {
@@ -339,19 +340,16 @@ export class CosmicMotionApp {
         this.showTerminators = !this.showTerminators;
       },
       onToggleFlightMode: () => {
-        if (this.flightMode) {
-          this.exitFlightMode();
-        } else {
-          this.enterFlightMode();
-        }
+        this.showFlightHint(6000);
       },
       onFlightHover: (hovering: boolean) => {
-        if (hovering && this.flightMode) {
-          this.showFlightHint(3000);
-        } else if (hovering && !this.flightMode) {
-          this.showFlightHint(3000);
-        } else {
+        if (hovering) {
           if (this.flightHintTimer) clearTimeout(this.flightHintTimer);
+          this.flightHintTimer = null;
+          this.flightHintEl.style.display = '';
+          this.flightHintEl.classList.remove('cm-flight-hint-fade');
+          void this.flightHintEl.offsetWidth;
+        } else {
           this.flightHintEl.classList.add('cm-flight-hint-fade');
         }
       },
@@ -1268,7 +1266,10 @@ export class CosmicMotionApp {
   navigateToBody(bodyName: string): void {
     if (bodyName === this.currentBody || this.isNavigating) return;
 
-    if (this.flightMode) this.exitFlightMode();
+    this.flightLocked = true;
+    this.flightMouseDown = false;
+    this.flightKeys = {};
+    this.controls.enabled = true;
 
     this.previousBody = this.currentBody;
     this.currentBody = bodyName;
@@ -1468,7 +1469,7 @@ export class CosmicMotionApp {
     const focusDist = camPos.distanceTo(focusedPos);
     const focusTrueR = this.bodyTrueRadius(this.currentBody);
     this.controls.minDistance = Math.max(focusTrueR * 2.5, 0.0005);
-    if (!this.flightMode) {
+    if (this.flightLocked) {
       this.camera.near = Math.min(0.1, Math.max(0.0001, focusDist * 0.05));
       this.camera.updateProjectionMatrix();
     }
@@ -2794,8 +2795,8 @@ export class CosmicMotionApp {
     nameEl.textContent = nearestName;
     distEl.textContent = distStr;
 
-    const lookDir = this.flightMode
-      ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    const lookDir = !this.flightLocked
+      ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.flightQuat)
       : this.controls.target.clone().sub(cam).normalize();
 
     // Ecliptic heading (longitude) and pitch (latitude) from the look direction
@@ -3551,34 +3552,46 @@ export class CosmicMotionApp {
 
   // ── Flight Mode ──
 
+  private static readonly FLIGHT_SPEEDS = [
+    { val: 0.001,  label: '150 km/s' },
+    { val: 0.005,  label: '750 km/s' },
+    { val: 0.02,   label: '3,000 km/s' },
+    { val: 0.05,   label: '0.01c' },
+    { val: 0.2,    label: '0.03 AU/s' },
+    { val: 1.0,    label: '0.15 AU/s' },
+    { val: 5.0,    label: '0.75 AU/s' },
+    { val: 20.0,   label: '3 AU/s' },
+    { val: 80.0,   label: '12 AU/s' },
+    { val: 300.0,  label: '45 AU/s' },
+  ];
+
+  private static readonly FLIGHT_THRUST_KEYS = ['w', 's', 'a', 'd', 'r', 'f', 'q', 'e',
+    'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+
+  private breakLock(): void {
+    if (!this.flightLocked) return;
+    this.flightLocked = false;
+    this.controls.enabled = false;
+    this.flightQuat.copy(this.camera.quaternion);
+    this.flightVelocity.set(0, 0, 0);
+  }
+
   private initFlightControls(): void {
-    const SPEED_LEVELS = [
-      { val: 0.001, label: '150 km/s' },
-      { val: 0.005, label: '750 km/s' },
-      { val: 0.02,  label: '3,000 km/s' },
-      { val: 0.05,  label: '0.01c' },
-      { val: 0.2,   label: '0.03 AU/s' },
-      { val: 1.0,   label: '0.15 AU/s' },
-      { val: 5.0,   label: '0.75 AU/s' },
-      { val: 20.0,  label: '3 AU/s' },
-      { val: 80.0,  label: '12 AU/s' },
-      { val: 300.0, label: '45 AU/s' },
-    ];
     this.flightSpeedLevel = 5;
-    this.flightSpeed = SPEED_LEVELS[this.flightSpeedLevel].val;
+    this.flightSpeed = CosmicMotionApp.FLIGHT_SPEEDS[this.flightSpeedLevel].val;
 
     window.addEventListener('keydown', (e) => {
-      if (!this.flightMode) {
-        if (e.key === 'v' || e.key === 'V') {
-          e.preventDefault();
-          this.enterFlightMode();
-        }
-        return;
+      const key = e.key.toLowerCase();
+      this.flightKeys[key] = true;
+
+      if (CosmicMotionApp.FLIGHT_THRUST_KEYS.includes(key)) {
+        this.breakLock();
       }
-      this.flightKeys[e.key.toLowerCase()] = true;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        this.exitFlightMode();
+
+      if (key === 'n' && !this.flightLocked) {
+        this.flightNewton = !this.flightNewton;
+        this.flightNewtonEl.textContent = this.flightNewton ? 'NEWTON ON' : 'DAMPED';
+        this.flightNewtonEl.classList.toggle('cm-newton-on', this.flightNewton);
       }
     });
 
@@ -3587,22 +3600,26 @@ export class CosmicMotionApp {
     });
 
     this.renderer.domElement.addEventListener('mousedown', (e) => {
-      if (!this.flightMode || e.button !== 2) return;
-      e.preventDefault();
-      this.flightMouseDown = true;
-      this.flightMousePrevX = e.clientX;
-      this.flightMousePrevY = e.clientY;
+      if (e.button !== 2) return;
+      if (!this.flightLocked) {
+        e.preventDefault();
+        this.flightMouseDown = true;
+        this.flightMousePrevX = e.clientX;
+        this.flightMousePrevY = e.clientY;
+      }
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (!this.flightMode || !this.flightMouseDown) return;
-      const dx = e.clientX - this.flightMousePrevX;
-      const dy = e.clientY - this.flightMousePrevY;
+      if (this.flightLocked || !this.flightMouseDown) return;
+      const precision = this.flightKeys['control'] ? 0.1 : 1.0;
+      const dx = (e.clientX - this.flightMousePrevX) * 0.003 * precision;
+      const dy = (e.clientY - this.flightMousePrevY) * 0.003 * precision;
       this.flightMousePrevX = e.clientX;
       this.flightMousePrevY = e.clientY;
-      this.flightYaw -= dx * 0.003;
-      this.flightPitch -= dy * 0.003;
-      this.flightPitch = Math.max(-Math.PI * 0.499, Math.min(Math.PI * 0.499, this.flightPitch));
+
+      const pitchQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -dy);
+      const yawQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -dx);
+      this.flightQuat.multiply(yawQ).multiply(pitchQ).normalize();
     });
 
     window.addEventListener('mouseup', (e) => {
@@ -3610,27 +3627,28 @@ export class CosmicMotionApp {
     });
 
     this.renderer.domElement.addEventListener('contextmenu', (e) => {
-      if (this.flightMode) e.preventDefault();
+      if (!this.flightLocked) e.preventDefault();
     });
 
     this.renderer.domElement.addEventListener('wheel', (e) => {
-      if (!this.flightMode) return;
+      if (this.flightLocked) return;
       e.preventDefault();
-      if (e.deltaY < 0 && this.flightSpeedLevel < SPEED_LEVELS.length - 1) {
+      const speeds = CosmicMotionApp.FLIGHT_SPEEDS;
+      if (e.deltaY < 0 && this.flightSpeedLevel < speeds.length - 1) {
         this.flightSpeedLevel++;
       } else if (e.deltaY > 0 && this.flightSpeedLevel > 0) {
         this.flightSpeedLevel--;
       }
-      this.flightSpeed = SPEED_LEVELS[this.flightSpeedLevel].val;
+      this.flightSpeed = speeds[this.flightSpeedLevel].val;
       if (this.flightSpeedEl) {
-        this.flightSpeedEl.textContent = SPEED_LEVELS[this.flightSpeedLevel].label;
+        this.flightSpeedEl.textContent = speeds[this.flightSpeedLevel].label;
       }
     }, { passive: false });
 
     this.flightHintEl = document.createElement('div');
     this.flightHintEl.className = 'cm-flight-hint';
     this.flightHintEl.innerHTML = `
-      <div class="cm-flight-hint-title">FREE FLIGHT</div>
+      <div class="cm-flight-hint-title">FLIGHT CONTROLS — 6DOF</div>
       <div class="cm-flight-hint-keys">
         <span>WASD</span> move &nbsp;
         <span>R/F</span> up/down &nbsp;
@@ -3638,29 +3656,17 @@ export class CosmicMotionApp {
         <span>Right-drag</span> look &nbsp;
         <span>Scroll</span> speed &nbsp;
         <span>Shift</span> boost<br>
-        <span>ESC</span> or <span>V</span> exit
+        <span>Ctrl</span> precision &nbsp;
+        <span>N</span> Newton toggle<br>
+        Click a body to return to orbit
       </div>
-      <div class="cm-flight-speed">Speed: <span class="cm-flight-speed-val">${SPEED_LEVELS[this.flightSpeedLevel].label}</span></div>
+      <div class="cm-flight-speed">Speed: <span class="cm-flight-speed-val">${CosmicMotionApp.FLIGHT_SPEEDS[this.flightSpeedLevel].label}</span></div>
+      <div class="cm-flight-newton">DAMPED</div>
     `;
     this.flightHintEl.style.display = 'none';
     document.body.appendChild(this.flightHintEl);
     this.flightSpeedEl = this.flightHintEl.querySelector('.cm-flight-speed-val')!;
-  }
-
-  enterFlightMode(): void {
-    if (this.flightMode) return;
-    this.flightMode = true;
-    this.controls.enabled = false;
-
-    const lookDir = new THREE.Vector3();
-    this.camera.getWorldDirection(lookDir);
-    this.flightYaw = Math.atan2(-lookDir.x, -lookDir.z);
-    this.flightPitch = Math.asin(Math.max(-1, Math.min(1, lookDir.y)));
-
-    this.flightVelocity.set(0, 0, 0);
-    this.flightKeys = {};
-
-    this.showFlightHint(6000);
+    this.flightNewtonEl = this.flightHintEl.querySelector('.cm-flight-newton')!;
   }
 
   private showFlightHint(fadeAfterMs: number): void {
@@ -3672,22 +3678,6 @@ export class CosmicMotionApp {
       this.flightHintEl.classList.add('cm-flight-hint-fade');
       this.flightHintTimer = null;
     }, fadeAfterMs);
-  }
-
-  exitFlightMode(): void {
-    if (!this.flightMode) return;
-    this.flightMode = false;
-    this.flightKeys = {};
-    this.flightMouseDown = false;
-
-    const nearestBody = this.findNearestBody();
-    const targetPos = this.getBodyScenePos(nearestBody);
-    this.controls.target.copy(targetPos);
-    this.currentBody = nearestBody;
-    this.controls.enabled = true;
-    this.controls.update();
-
-    this.flightHintEl.style.display = 'none';
   }
 
   private findNearestBody(): string {
@@ -3704,24 +3694,30 @@ export class CosmicMotionApp {
   }
 
   private updateFlightMode(dt: number): void {
-    if (!this.flightMode) return;
+    if (this.flightLocked) return;
 
     const k = this.flightKeys;
+    const precision = k['control'] ? 0.1 : 1.0;
     const boost = k['shift'] ? 5 : 1;
-    const speed = this.flightSpeed * boost * dt;
-    const damping = 0.88;
+    const speed = this.flightSpeed * boost * precision * dt;
 
-    const forward = new THREE.Vector3(0, 0, -1);
-    const right = new THREE.Vector3(1, 0, 0);
-    const up = new THREE.Vector3(0, 1, 0);
+    // Roll via Q/E — true roll around camera forward axis
+    const rollRate = 1.5 * dt * precision;
+    if (k['q']) {
+      const rollQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rollRate);
+      this.flightQuat.multiply(rollQ).normalize();
+    }
+    if (k['e']) {
+      const rollQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -rollRate);
+      this.flightQuat.multiply(rollQ).normalize();
+    }
 
-    const euler = new THREE.Euler(this.flightPitch, this.flightYaw, 0, 'YXZ');
-    const quat = new THREE.Quaternion().setFromEuler(euler);
+    // Derive local axes from the quaternion
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.flightQuat);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.flightQuat);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.flightQuat);
 
-    forward.applyQuaternion(quat);
-    right.applyQuaternion(quat);
-    up.applyQuaternion(quat);
-
+    // Accumulate thrust in camera-local space
     const accel = new THREE.Vector3();
     if (k['w'] || k['arrowup'])    accel.add(forward);
     if (k['s'] || k['arrowdown'])  accel.sub(forward);
@@ -3735,22 +3731,18 @@ export class CosmicMotionApp {
       this.flightVelocity.add(accel);
     }
 
-    this.flightVelocity.multiplyScalar(damping);
+    if (!this.flightNewton) {
+      this.flightVelocity.multiplyScalar(0.88);
+    }
 
-    if (this.flightVelocity.lengthSq() < 1e-12) {
+    if (this.flightVelocity.lengthSq() < 1e-14) {
       this.flightVelocity.set(0, 0, 0);
     }
 
     this.camera.position.add(this.flightVelocity);
+    this.camera.quaternion.copy(this.flightQuat);
 
-    // Roll
-    const rollSpeed = 1.5 * dt;
-    if (k['q']) this.flightYaw -= rollSpeed * 0.3;
-    if (k['e']) this.flightYaw += rollSpeed * 0.3;
-
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.flightPitch, this.flightYaw, 0, 'YXZ'));
-
-    const lookTarget = this.camera.position.clone().add(forward.normalize());
+    const lookTarget = this.camera.position.clone().add(forward);
     this.controls.target.copy(lookTarget);
 
     const nearestBody = this.findNearestBody();
@@ -3943,7 +3935,7 @@ export class CosmicMotionApp {
     // Update location marker position every frame (rotates with Earth)
     this.updateLocationMarker();
 
-    if (this.flightMode) {
+    if (!this.flightLocked) {
       this.updateFlightMode(delta);
     } else if (this.followGhost && this.ghostGroup.visible) {
       const ghostDelta = this.ghostWorldPos.clone().sub(this.controls.target);
@@ -3958,7 +3950,7 @@ export class CosmicMotionApp {
     this.upQuatCurrent.slerp(this.upQuatTarget, 0.06);
     this.scenePivot.quaternion.copy(this.upQuatCurrent);
 
-    if (!this.flightMode) this.controls.update();
+    if (this.flightLocked) this.controls.update();
 
     this.updatePerspectiveScaling();
 
