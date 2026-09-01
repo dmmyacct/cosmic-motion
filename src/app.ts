@@ -3283,13 +3283,18 @@ export class CosmicMotionApp {
       }
     }
 
-    // On first load, place camera near Earth looking toward the Sun
+    // On first load, place camera near Earth at HDG ~135.5° PIT ~-12.7°
     if (this.firstLoad) {
       this.firstLoad = false;
-      const camPos = new THREE.Vector3(
-        0.9399 * AU_SCENE,
-        0.0001 * AU_SCENE,
-        0.3686 * AU_SCENE,
+      const hdgRad = 135.5 * Math.PI / 180;
+      const pitRad = -12.7 * Math.PI / 180;
+      const cosPit = Math.cos(pitRad);
+      const lookX = cosPit * Math.cos(hdgRad);
+      const lookZ = -cosPit * Math.sin(hdgRad);
+      const lookY = Math.sin(pitRad);
+      const offsetDist = 0.000313 * AU_SCENE;
+      const camPos = earthScenePos.clone().sub(
+        new THREE.Vector3(lookX, lookY, lookZ).multiplyScalar(offsetDist),
       );
       this.camera.position.copy(camPos);
       this.controls.target.copy(earthScenePos);
