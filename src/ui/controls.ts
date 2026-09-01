@@ -15,6 +15,8 @@ export interface UICallbacks {
   onToggleTrajectories: () => void;
   onToggleAllBeams: () => void;
   onToggleTerminators: () => void;
+  onToggleFlightMode: () => void;
+  onFlightHover: (hovering: boolean) => void;
 }
 
 export interface PlanetPanelData {
@@ -279,6 +281,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-beams-btn" title="Show all planet beams">☀</button>
       <button class="cm-term-btn" title="Toggle terminator lines">◐</button>
       <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>
+      <button class="cm-flight-btn" title="Free flight mode (V)">FLY</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
   `;
@@ -394,6 +397,14 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
     termBtn.classList.toggle('active');
     callbacks.onToggleTerminators();
   });
+
+  const flightBtn = timePanel.querySelector('.cm-flight-btn') as HTMLButtonElement;
+  flightBtn.addEventListener('click', () => {
+    flightBtn.classList.toggle('active');
+    callbacks.onToggleFlightMode();
+  });
+  flightBtn.addEventListener('mouseenter', () => callbacks.onFlightHover(true));
+  flightBtn.addEventListener('mouseleave', () => callbacks.onFlightHover(false));
 
   const UP_FRAMES: UpFrame[] = ['ecliptic', 'equatorial', 'galactic'];
   const UP_LABELS: Record<UpFrame, string> = {

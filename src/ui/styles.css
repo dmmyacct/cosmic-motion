@@ -971,3 +971,75 @@ canvas { display: block; }
   white-space: nowrap;
   text-align: right;
 }
+
+/* --- Flight Mode --- */
+.cm-flight-btn {
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-size: 9px;
+}
+.cm-flight-btn.active {
+  color: rgba(56, 189, 248, 0.95);
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
+.cm-flight-hint {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(6, 8, 18, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 10px;
+  padding: 14px 24px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 9999;
+  pointer-events: none;
+  text-align: center;
+  animation: flightHintIn 0.4s ease;
+}
+.cm-flight-hint.cm-flight-hint-fade {
+  animation: flightHintOut 2s ease forwards;
+}
+@keyframes flightHintIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes flightHintOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+.cm-flight-hint-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: rgba(56, 189, 248, 0.9);
+  margin-bottom: 8px;
+  text-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+}
+.cm-flight-hint-keys {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.8;
+}
+.cm-flight-hint-keys span {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+}
+.cm-flight-speed {
+  margin-top: 8px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.5px;
+}
+.cm-flight-speed-val {
+  color: rgba(56, 189, 248, 0.8);
+  font-weight: 700;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+}
