@@ -2546,8 +2546,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-38%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 2.6);
+        // Fade out over the aim phase (0-12%)
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 8);
       }
     }
 
@@ -2602,11 +2602,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.38
-        ? Math.min(1, tg / 0.10)
-        : tg < 0.44
+      const lockVis = tg < 0.12
+        ? Math.min(1, tg / 0.04)
+        : tg < 0.16
           ? 1
-          : Math.max(0, 1 - (tg - 0.44) / 0.05);
+          : Math.max(0, 1 - (tg - 0.16) / 0.05);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -3998,10 +3998,10 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.38;  // aim phase ends
-      const P2_END = 0.44;  // lock-on phase ends
-      const P3_END = 0.62;  // charge phase ends
-      // Phase 4: 0.62–1.00 — Sun orient
+      const P1_END = 0.12;  // aim phase ends
+      const P2_END = 0.16;  // lock-on phase ends
+      const P3_END = 0.75;  // charge phase ends
+      // Phase 4: 0.75–1.00 — Sun orient
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {
