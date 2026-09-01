@@ -182,6 +182,9 @@ export class CosmicMotionApp {
   private navChargeEnd = new THREE.Vector3();
   private navFinalCamPos = new THREE.Vector3();
   private navLockOnSpin = 0;
+  private navP1 = 0;
+  private navP2 = 0;
+  private navP3 = 0;
   private navTripDistKm = 0;
   private navTripSpeedC = 0;
   private navTripEta = '';
@@ -1339,21 +1342,28 @@ export class CosmicMotionApp {
     // and cross-system journeys feel like real voyages
     const travelDist = this.camera.position.distanceTo(targetPos);
     const travelAU = travelDist / AU_SCENE;
-    let baseDuration: number;
+    const AIM_SEC = 1.5;
+    const LOCK_SEC = 0.6;
+    const ORIENT_SEC = 2.0;
+    const fixedSec = AIM_SEC + LOCK_SEC + ORIENT_SEC;
+
+    let chargeSec: number;
     if (bodyName === 'Moon' || this.previousBody === 'Moon') {
-      baseDuration = 6.0;
+      chargeSec = 2.0;
     } else if (travelAU < 1) {
-      baseDuration = 8.0 + travelAU * 2.0;
+      chargeSec = 2.0 + travelAU * 2.0;
     } else {
-      baseDuration = 9.0 + Math.sqrt(travelAU) * 3.0;
+      chargeSec = 3.0 + Math.sqrt(travelAU) * 2.0;
     }
-    this.navDuration = Math.max(7.0, Math.min(24.0, baseDuration));
+    chargeSec = Math.max(1.5, Math.min(12.0, chargeSec));
+
+    this.navDuration = fixedSec + chargeSec;
+    this.navP1 = AIM_SEC / this.navDuration;
+    this.navP2 = (AIM_SEC + LOCK_SEC) / this.navDuration;
+    this.navP3 = (AIM_SEC + LOCK_SEC + chargeSec) / this.navDuration;
     this.controls.enabled = false;
 
-    const P2_END_SETUP = 0.46;
-    const P3_END_SETUP = 0.76;
     this.navTripDistKm = travelAU * AU_KM_VAL;
-    const chargeSec = this.navDuration * (P3_END_SETUP - P2_END_SETUP);
     this.navTripSpeedC = this.navTripDistKm / Math.max(0.01, chargeSec) / 299792.458;
 
     this.navTripEta = chargeSec >= 10
@@ -2600,8 +2610,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-40%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 2.5);
+        // Fade out over the aim phase
+        this.hudTargetOpacity = Math.max(0, 1 - tg / this.navP1);
       }
     }
 
@@ -2656,11 +2666,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.40
-        ? Math.min(1, tg / 0.10)
-        : tg < 0.46
+      const lockVis = tg < this.navP1
+        ? Math.min(1, tg / 0.08)
+        : tg < this.navP2
           ? 1
-          : Math.max(0, 1 - (tg - 0.46) / 0.06);
+          : Math.max(0, 1 - (tg - this.navP2) / 0.06);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -2692,9 +2702,9 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       let tripOpacity = 0;
-      if (tg >= 0.40 && tg < 0.46) {
-        tripOpacity = Math.min(1, (tg - 0.40) / 0.03);
-      } else if (tg >= 0.46) {
+      if (tg >= this.navP1 && tg < this.navP2) {
+        tripOpacity = Math.min(1, (tg - this.navP1) / (this.navP2 - this.navP1));
+      } else if (tg >= this.navP2) {
         tripOpacity = 1;
       }
       this.tripCard.style.opacity = String(tripOpacity);
@@ -2702,14 +2712,14 @@ export class CosmicMotionApp {
 
       // Live countdown: ETA counts down during charge (travel to object)
       const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
-      if (etaEl && tg >= 0.46 && tg < 0.76) {
-        const chargeProgress = (tg - 0.46) / (0.76 - 0.46);
-        const chargeTotalSec = this.navDuration * (0.76 - 0.46);
+      if (etaEl && tg >= this.navP2 && tg < this.navP3) {
+        const chargeProgress = (tg - this.navP2) / (this.navP3 - this.navP2);
+        const chargeTotalSec = this.navDuration * (this.navP3 - this.navP2);
         const remaining = Math.max(0, chargeTotalSec * (1 - chargeProgress));
         etaEl.textContent = remaining >= 10
           ? `${remaining.toFixed(0)}s`
           : `${remaining.toFixed(1)}s`;
-      } else if (etaEl && tg >= 0.76) {
+      } else if (etaEl && tg >= this.navP3) {
         etaEl.textContent = 'ARRIVED';
       }
     } else if (this.navTripCardTimer > 0) {
@@ -4085,10 +4095,9 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.40;  // aim: slow, dramatic pan to find the target
-      const P2_END = 0.46;  // lock-on: brief beat, trip card appears, then launch
-      const P3_END = 0.76;  // charge: the actual travel
-      // Phase 4: 0.76–1.00 — Sun orient
+      const P1_END = this.navP1;
+      const P2_END = this.navP2;
+      const P3_END = this.navP3;
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {
