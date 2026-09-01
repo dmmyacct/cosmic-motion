@@ -157,6 +157,7 @@ export class CosmicMotionApp {
   private showTrajectories = false;
   private showLabels = true;
   private bodyLabels = new Map<string, HTMLElement>();
+  private beamInfoEl!: HTMLElement;
   private showAllBeams = false;
   private showTerminators = false;
   private earthTerminator!: THREE.LineLoop;
@@ -2482,6 +2483,10 @@ export class CosmicMotionApp {
       this.bodyLabels.set(body.name, el);
     }
 
+    this.beamInfoEl = document.createElement('div');
+    this.beamInfoEl.className = 'cm-beam-info';
+    this.hudOverlay.appendChild(this.beamInfoEl);
+
     this.buildPositionIndicator(container);
   }
 
@@ -2821,6 +2826,45 @@ export class CosmicMotionApp {
       labelPositions.push({ x: lx, y: ly, name: bodyName });
       el.style.transform = `translate(${lx}px, ${ly}px)`;
       el.style.opacity = '1';
+    }
+
+    // Beam info — DOM overlay anchored below the beam line in screen space
+    const focusBody = this.currentBody;
+    if (focusBody !== 'Sun' && !this.isNavigating) {
+      const bodyPos = this.getBodyScenePos(focusBody);
+      const sunPos3 = this.sunMesh.position.clone();
+      const bScreen = bodyPos.clone().project(this.camera);
+      const sScreen = sunPos3.clone().project(this.camera);
+      if (bScreen.z < 1) {
+        const bx = (bScreen.x * 0.5 + 0.5) * w;
+        const by = (-bScreen.y * 0.5 + 0.5) * h;
+        const sx2 = (sScreen.x * 0.5 + 0.5) * w;
+        const sy2 = (-sScreen.y * 0.5 + 0.5) * h;
+
+        // Screen-space beam direction: body → Sun
+        let dx = sx2 - bx;
+        let dy = sy2 - by;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len > 0.1) { dx /= len; dy /= len; } else { dx = 1; dy = 0; }
+
+        // Perpendicular pointing screen-down (positive y = down in screen coords)
+        let px = -dy;
+        let py = dx;
+        if (py < 0) { px = -px; py = -py; }
+
+        // Position: slightly along beam toward Sun, then offset below
+        const along = 30;
+        const below = 14;
+        const ix = bx + dx * along + px * below;
+        const iy = by + dy * along + py * below;
+
+        this.beamInfoEl.style.transform = `translate(${ix}px, ${iy}px)`;
+        this.beamInfoEl.style.opacity = '1';
+      } else {
+        this.beamInfoEl.style.opacity = '0';
+      }
+    } else {
+      this.beamInfoEl.style.opacity = '0';
     }
   }
 
@@ -3277,11 +3321,11 @@ export class CosmicMotionApp {
     const lightSec = sunKm / 299792.458;
     const lightMin = Math.floor(lightSec / 60);
     const lightS = Math.round(lightSec % 60);
-    this.updateDistLabel(
-      this.sunDistLabel,
-      `☉  ${(sunKm / 1e6).toFixed(1)}M km  ·  ${lightMin}m ${String(lightS).padStart(2, '0')}s light`,
-      'rgba(255, 230, 160, 0.85)',
-    );
+    const sunInfoStr = `☉  ${(sunKm / 1e6).toFixed(1)}M km  ·  ${lightMin}m ${String(lightS).padStart(2, '0')}s light`;
+    this.updateDistLabel(this.sunDistLabel, sunInfoStr, 'rgba(255, 230, 160, 0.85)');
+    if (this.currentBody === 'Earth') {
+      this.beamInfoEl.textContent = sunInfoStr;
+    }
 
     // Update per-planet beam lines and distance labels
     for (const pp of planetPositions) {
@@ -3312,11 +3356,11 @@ export class CosmicMotionApp {
         const ltStr = pLightMin > 0
           ? `${pLightMin}m ${String(pLightS).padStart(2, '0')}s`
           : `${pLightSec.toFixed(1)}s`;
-        this.updateDistLabel(
-          distLabel,
-          `☉  ${(pKm / 1e6).toFixed(1)}M km  ·  ${ltStr} light`,
-          'rgba(255, 230, 160, 0.85)',
-        );
+        const pInfoStr = `☉  ${(pKm / 1e6).toFixed(1)}M km  ·  ${ltStr} light`;
+        this.updateDistLabel(distLabel, pInfoStr, 'rgba(255, 230, 160, 0.85)');
+        if (this.currentBody === pp.name) {
+          this.beamInfoEl.textContent = pInfoStr;
+        }
       }
     }
 
@@ -4114,10 +4158,10 @@ export class CosmicMotionApp {
     // Sun label — hide when focused on the Sun
     this.sunLabel.visible = focusedBody !== 'Sun';
 
-    // Earth beam/labels
+    // Earth beam/labels — hide 3D sprite label when DOM overlay is active
     const earthShow = focusedBody === 'Earth' || this.showAllBeams;
     this.sunBeam.visible = earthShow;
-    this.sunDistLabel.visible = earthShow;
+    this.sunDistLabel.visible = earthShow && focusedBody !== 'Earth';
     this.ghostSunBeam.visible = earthShow;
     this.ghostSunDistLabel.visible = earthShow;
     if (ghostActive) {
@@ -4135,7 +4179,7 @@ export class CosmicMotionApp {
       const beamMat = beam.material as THREE.LineBasicMaterial;
       beamMat.opacity = focusedBody === name ? 0.35 : 0.12;
       const dl = this.planetDistLabels.get(name);
-      if (dl) dl.visible = show;
+      if (dl) dl.visible = show && focusedBody !== name;
 
       if (ghostActive) {
         const gb = this.planetGhostBeams.get(name);
