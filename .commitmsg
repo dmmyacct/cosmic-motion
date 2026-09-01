@@ -1,6 +1,6 @@
-Spacecraft nav readout, heading/facing indicator, initial view and location fixes
+Terminator lines — day/night boundary for all bodies
 
-Add bottom-left position indicator HUD showing heliocentric ecliptic
-coordinates (X/Y/Z in AU), nearest body with distance, heading/pitch,
-facing body, and Sun distance with light-time. Fix location marker
-projection and toggle sync. Set default camera at ~50k km from Earth.
+Add toggleable terminator lines (◐ button, default off) showing the
+exact sunlight boundary on Earth, Moon, and all planets. Lines orient
+perpendicular to each body's sun direction and update with time
+progression. Always pre-oriented so they're correct when toggled on.

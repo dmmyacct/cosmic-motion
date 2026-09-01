@@ -156,6 +156,10 @@ export class CosmicMotionApp {
   private showOrbits = true;
   private showTrajectories = true;
   private showAllBeams = false;
+  private showTerminators = false;
+  private earthTerminator!: THREE.LineLoop;
+  private moonTerminator!: THREE.LineLoop;
+  private planetTerminators = new Map<string, THREE.LineLoop>();
 
   private planetBeams = new Map<string, THREE.Line>();
   private planetDistLabels = new Map<string, THREE.Sprite>();
@@ -236,6 +240,7 @@ export class CosmicMotionApp {
     this.buildOrbitalRing();
     this.buildPlanets();
     this.buildLocationMarker();
+    this.buildTerminators();
 
     this.buildGhost();
     this.buildPlanetBeams();
@@ -310,6 +315,9 @@ export class CosmicMotionApp {
       },
       onToggleAllBeams: () => {
         this.showAllBeams = !this.showAllBeams;
+      },
+      onToggleTerminators: () => {
+        this.showTerminators = !this.showTerminators;
       },
     });
 
@@ -1341,6 +1349,7 @@ export class CosmicMotionApp {
 
     this.locMarker.scale.setScalar(earthSf);
     this.arrowHelper.scale.setScalar(earthSf);
+    this.earthTerminator.scale.setScalar(earthSf);
 
     // ── Moon ──
     this.moonMesh.getWorldPosition(_wp);
@@ -1350,6 +1359,7 @@ export class CosmicMotionApp {
     this.moonMesh.scale.setScalar(moonSf);
     this.moonAxisLine.scale.setScalar(moonSf);
     this.moonSweep.scale.setScalar(moonSf);
+    this.moonTerminator.scale.setScalar(moonSf);
 
     // ── Other planets ──
     for (const planet of PLANETS) {
@@ -1380,6 +1390,9 @@ export class CosmicMotionApp {
         const rings = this.planetMeshes.get('SaturnRings');
         if (rings) rings.scale.setScalar(sf);
       }
+
+      const term = this.planetTerminators.get(planet.name);
+      if (term) term.scale.setScalar(sf);
     }
 
     // ── Ghost bodies ──
@@ -1439,6 +1452,44 @@ export class CosmicMotionApp {
       <div class="cm-loc-line2"></div>
     `;
     document.getElementById('app')!.appendChild(this.locOverlay);
+  }
+
+  private createTerminatorLine(radius: number, color: number, segments = 128): THREE.LineLoop {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      pts.push(new THREE.Vector3(0, Math.cos(angle) * radius, Math.sin(angle) * radius));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({
+      color, transparent: true, opacity: 0.6, depthWrite: false,
+    });
+    return new THREE.LineLoop(geo, mat);
+  }
+
+  private orientTerminator(line: THREE.LineLoop, sunDir: THREE.Vector3): void {
+    const q = new THREE.Quaternion();
+    q.setFromUnitVectors(new THREE.Vector3(1, 0, 0), sunDir.clone().normalize());
+    line.quaternion.copy(q);
+  }
+
+  private buildTerminators(): void {
+    this.earthTerminator = this.createTerminatorLine(EARTH_R * 1.002, 0x44aaff);
+    this.earthTerminator.visible = false;
+    this.earthGroup.add(this.earthTerminator);
+
+    this.moonTerminator = this.createTerminatorLine(MOON_MESH_R * 1.002, 0xaaaaaa);
+    this.moonTerminator.visible = false;
+    this.earthGroup.add(this.moonTerminator);
+
+    for (const planet of PLANETS) {
+      if (planet.name === 'Earth') continue;
+      const line = this.createTerminatorLine(planet.sceneRadius * 1.002, new THREE.Color(planet.color).getHex());
+      line.visible = false;
+      const group = this.planetGroups.get(planet.name);
+      if (group) group.add(line);
+      this.planetTerminators.set(planet.name, line);
+    }
   }
 
   private updateLocationMarker(): void {
@@ -2724,6 +2775,8 @@ export class CosmicMotionApp {
             (rings.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
           }
         }
+        const term = this.planetTerminators.get(pp.name);
+        if (term) this.orientTerminator(term, toSun);
       }
     }
 
@@ -2746,6 +2799,11 @@ export class CosmicMotionApp {
     (this.clouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
     (this.moonMesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(sunDirNorm);
+
+    // Terminator lines — always orient so they're correct when toggled on
+    this.orientTerminator(this.earthTerminator, sunDirNorm);
+    this.moonTerminator.position.copy(this.moonMesh.position);
+    this.orientTerminator(this.moonTerminator, sunDirNorm);
 
     // Sun beam from Earth to Sun (both in scenePivot world coords)
     const beamArr = new Float32Array([
@@ -3367,6 +3425,11 @@ export class CosmicMotionApp {
     if (this.sunTrajectoryPast) this.sunTrajectoryPast.visible = trajVis;
     if (this.sunTrajectoryFuture) this.sunTrajectoryFuture.visible = trajVis;
     for (const line of this.planetTrajectoryLines) line.visible = trajVis;
+
+    // Terminator line visibility
+    this.earthTerminator.visible = this.showTerminators;
+    this.moonTerminator.visible = this.showTerminators;
+    for (const [, term] of this.planetTerminators) term.visible = this.showTerminators;
 
     // Planet glows and body scaling handled in updatePerspectiveScaling()
 

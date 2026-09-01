@@ -14,6 +14,7 @@ export interface UICallbacks {
   onToggleOrbits: () => void;
   onToggleTrajectories: () => void;
   onToggleAllBeams: () => void;
+  onToggleTerminators: () => void;
 }
 
 export interface PlanetPanelData {
@@ -276,6 +277,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-orbits-btn active" title="Toggle orbit rings">◯</button>
       <button class="cm-traj-btn active" title="Toggle trajectories">∿</button>
       <button class="cm-beams-btn" title="Show all planet beams">☀</button>
+      <button class="cm-term-btn" title="Toggle terminator lines">◐</button>
       <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
     </div>
@@ -294,6 +296,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const orbitsBtn = timePanel.querySelector('.cm-orbits-btn') as HTMLButtonElement;
   const trajBtn = timePanel.querySelector('.cm-traj-btn') as HTMLButtonElement;
   const beamsBtn = timePanel.querySelector('.cm-beams-btn') as HTMLButtonElement;
+  const termBtn = timePanel.querySelector('.cm-term-btn') as HTMLButtonElement;
   const upBtn = timePanel.querySelector('.cm-up-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
@@ -385,6 +388,11 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   beamsBtn.addEventListener('click', () => {
     beamsBtn.classList.toggle('active');
     callbacks.onToggleAllBeams();
+  });
+
+  termBtn.addEventListener('click', () => {
+    termBtn.classList.toggle('active');
+    callbacks.onToggleTerminators();
   });
 
   const UP_FRAMES: UpFrame[] = ['ecliptic', 'equatorial', 'galactic'];
