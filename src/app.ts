@@ -4020,26 +4020,26 @@ export class CosmicMotionApp {
       const destPos = this.getBodyScenePos(this.navTargetBody);
 
       if (tGlobal < P1_END) {
-        // Phase 1 — Aim: camera stays put, view rotates toward target
+        // Phase 1 — Aim: camera stays put, view drifts gently toward target
         const pt = tGlobal / P1_END;
-        const ease = pt * pt * (3 - 2 * pt); // smoothstep
+        // Very gentle exponential ease — mostly slow, accelerates only at the end
+        const ease = pt * pt * pt;
         this.controls.target.lerpVectors(this.navStartTarget, destPos, ease);
 
       } else if (tGlobal < P2_END) {
-        // Phase 2 — Lock-on: camera still stationary, reticle effect
-        this.controls.target.copy(destPos);
+        // Phase 2 — Lock-on: camera still stationary, finish aiming + reticle
         const pt = (tGlobal - P1_END) / (P2_END - P1_END);
+        // Finish the aim rotation smoothly during lock-on
+        this.controls.target.lerpVectors(this.controls.target, destPos, 0.12);
         this.navLockOnSpin = pt;
 
       } else if (tGlobal < P3_END) {
         // Phase 3 — Charge: straight line from current pos to close orbit
         const pt = (tGlobal - P2_END) / (P3_END - P2_END);
-        // Quintic ease-in-out for dramatic acceleration/deceleration
         const ease = pt < 0.5
           ? 16 * pt * pt * pt * pt * pt
           : 1 - Math.pow(-2 * pt + 2, 5) / 2;
 
-        // Recompute charge end each frame to track moving body
         const chargeDir = destPos.clone().sub(this.navStartCamPos).normalize();
         const trueR = this.bodyTrueRadius(this.navTargetBody);
         const sunPos = this.sunMesh.position.clone();
@@ -4055,39 +4055,55 @@ export class CosmicMotionApp {
         this.controls.target.copy(destPos);
 
       } else {
-        // Phase 4 — Sun orient: orbit around the body to Sun-facing view
+        // Phase 4 — Sun orient: gently orbit left/right around the body
+        // until the Sun is reasonably in view. Never flip — preserve our up.
         const pt = (tGlobal - P3_END) / (1 - P3_END);
         const ease = pt * pt * (3 - 2 * pt);
 
         if (this.navTargetBody === 'Sun') {
           this.camera.position.lerp(this.navChargeEnd, 0.1);
         } else {
-          // Recompute Sun-oriented final position with live body pos
           const sunPos = this.sunMesh.position.clone();
           const toSun = sunPos.clone().sub(destPos);
           const dts = toSun.length();
           const sunDir = dts > 0.01 ? toSun.clone().normalize() : new THREE.Vector3(1, 0, 0);
-          const litSide = sunDir.clone().negate();
-          const up = new THREE.Vector3(0, 1, 0);
-          const trueR = this.bodyTrueRadius(this.navTargetBody);
-          const viewDist = this.navTargetBody === 'Moon'
-            ? MOON_DIST * 1.5
-            : Math.max(trueR * 8, Math.min(dts * 0.15, trueR * 30));
-          const finalPos = destPos.clone()
-            .add(litSide.multiplyScalar(viewDist))
-            .add(up.multiplyScalar(viewDist * 0.25));
 
-          // Spherical interpolation: orbit around the body at constant-ish distance
-          const currentOffset = this.camera.position.clone().sub(destPos);
-          const targetOffset = finalPos.clone().sub(destPos);
-          const currentDist = currentOffset.length();
-          const targetDist = targetOffset.length();
-          const dist = currentDist + (targetDist - currentDist) * ease;
-          currentOffset.normalize();
-          targetOffset.normalize();
-          // Slerp the direction
-          const slerpDir = currentOffset.clone().lerp(targetOffset, ease).normalize();
-          this.camera.position.copy(destPos).add(slerpDir.multiplyScalar(dist));
+          // Current offset from body to camera, projected onto the ecliptic plane
+          const offset = this.camera.position.clone().sub(destPos);
+          const dist = offset.length();
+
+          // Desired direction: anti-Sun with a little elevation
+          const desiredDir = sunDir.clone().negate();
+          desiredDir.y = 0.25;
+          desiredDir.normalize();
+
+          // Compute the signed angle between current and desired in the XZ plane
+          // to determine shortest rotation direction (left or right)
+          const curFlat = new THREE.Vector2(offset.x, offset.z).normalize();
+          const desFlat = new THREE.Vector2(desiredDir.x, desiredDir.z).normalize();
+          const cross2d = curFlat.x * desFlat.y - curFlat.y * desFlat.x;
+          const dot2d = curFlat.dot(desFlat);
+          let angle = Math.atan2(cross2d, dot2d);
+
+          // Only rotate as much as needed — cap to keep Sun "reasonably in view"
+          // (within ~60deg of forward) rather than perfectly behind
+          const maxAngle = Math.abs(angle);
+          const rotAmount = maxAngle * ease;
+          const rotSign = angle > 0 ? 1 : -1;
+
+          // Rotate the offset around Y by the computed amount
+          const cosA = Math.cos(rotSign * rotAmount);
+          const sinA = Math.sin(rotSign * rotAmount);
+          const rx = offset.x * cosA - offset.z * sinA;
+          const rz = offset.x * sinA + offset.z * cosA;
+
+          // Gently bring the elevation toward the desired
+          const targetY = desiredDir.y * dist;
+          const newY = offset.y + (targetY - offset.y) * ease * 0.5;
+
+          this.camera.position.copy(destPos).add(
+            new THREE.Vector3(rx, newY, rz).normalize().multiplyScalar(dist),
+          );
         }
         this.controls.target.copy(destPos);
         this.navLockOnSpin = 0;
@@ -4098,8 +4114,8 @@ export class CosmicMotionApp {
         this.navBodySwitched = false;
         this.navLockOnSpin = 0;
         this.controls.enabled = true;
-        this.controls.target.copy(this.navEndTarget);
-        this.camera.position.copy(this.navEndCamPos);
+        // Keep the position phase 4 settled into — don't snap to a precomputed pos
+        this.controls.target.copy(destPos);
         this.camera.fov = this.navFovBase;
         this.camera.updateProjectionMatrix();
         if (this.currentBody !== this.navTargetBody) {
