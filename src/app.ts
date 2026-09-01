@@ -3253,13 +3253,16 @@ export class CosmicMotionApp {
     this.planetOrbitsGroup.position.set(0, 0, 0);
     this.planetOrbitsGroup.scale.set(AU_SCENE, AU_SCENE, AU_SCENE);
 
-    // Sun distance label — tucked under the beam, right next to Earth
+    // Sun distance label — hugs the underside of the beam, right at Earth
     const sunToEarth = earthScenePos.clone().normalize();
-    const sunLabelPos = earthScenePos.clone().sub(sunToEarth.clone().multiplyScalar(3));
+    const camDistE = this.camera.position.distanceTo(earthScenePos);
+    const vFovE = this.camera.fov * Math.PI / 180;
+    const pxE = camDistE * Math.tan(vFovE / 2);
+    const sunLabelPos = earthScenePos.clone().sub(sunToEarth.clone().multiplyScalar(pxE * 0.12));
     const camRight = new THREE.Vector3().crossVectors(this.camera.up, sunToEarth).normalize();
     const belowDir = new THREE.Vector3().crossVectors(sunToEarth, camRight).normalize();
     if (belowDir.dot(this.camera.up) > 0) belowDir.negate();
-    sunLabelPos.add(belowDir.multiplyScalar(1.2));
+    sunLabelPos.add(belowDir.multiplyScalar(pxE * 0.032));
     this.sunDistLabel.position.copy(sunLabelPos);
     const sunKm = this.data.sunDistAU * 149597870.7;
     const lightSec = sunKm / 299792.458;
@@ -3286,11 +3289,14 @@ export class CosmicMotionApp {
       const distLabel = this.planetDistLabels.get(pp.name);
       if (distLabel) {
         const pBeamDir = planetPos.clone().normalize();
+        const camDistP = this.camera.position.distanceTo(planetPos);
+        const vFovP = this.camera.fov * Math.PI / 180;
+        const pxP = camDistP * Math.tan(vFovP / 2);
         const pCamRight = new THREE.Vector3().crossVectors(this.camera.up, pBeamDir).normalize();
         const pBelowDir = new THREE.Vector3().crossVectors(pBeamDir, pCamRight).normalize();
         if (pBelowDir.dot(this.camera.up) > 0) pBelowDir.negate();
-        const labelPos = planetPos.clone().sub(pBeamDir.clone().multiplyScalar(3));
-        labelPos.add(pBelowDir.multiplyScalar(1.2));
+        const labelPos = planetPos.clone().sub(pBeamDir.clone().multiplyScalar(pxP * 0.12));
+        labelPos.add(pBelowDir.multiplyScalar(pxP * 0.032));
         distLabel.position.copy(labelPos);
         const pKm = pp.distanceAU * 149597870.7;
         const pLightSec = pKm / 299792.458;
@@ -3476,13 +3482,16 @@ export class CosmicMotionApp {
     this.ghostMoon.position.copy(ghostPos).add(ghostMoonPos);
     (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
 
-    // Ghost Sun distance label — tucked under beam, near ghost Earth
+    // Ghost Sun distance label — hugs beam underside, near ghost Earth
     const gBeamDir = this.ghostSunWorldPos.clone().sub(ghostPos).normalize();
+    const gCamDistE = this.camera.position.distanceTo(ghostPos);
+    const gVFov = this.camera.fov * Math.PI / 180;
+    const gPx = gCamDistE * Math.tan(gVFov / 2);
     const gCamRight = new THREE.Vector3().crossVectors(this.camera.up, gBeamDir).normalize();
     const gBelowDir = new THREE.Vector3().crossVectors(gBeamDir, gCamRight).normalize();
     if (gBelowDir.dot(this.camera.up) > 0) gBelowDir.negate();
-    const ghostSunMid = ghostPos.clone().add(gBeamDir.clone().multiplyScalar(3));
-    ghostSunMid.add(gBelowDir.multiplyScalar(1.2));
+    const ghostSunMid = ghostPos.clone().add(gBeamDir.clone().multiplyScalar(gPx * 0.12));
+    ghostSunMid.add(gBelowDir.multiplyScalar(gPx * 0.032));
     this.ghostSunDistLabel.position.copy(ghostSunMid);
     const gSunKm = ghostData.sunDistAU * 149597870.7;
     const gLightSec = gSunKm / 299792.458;
@@ -3577,11 +3586,14 @@ export class CosmicMotionApp {
       const gDistLabel = this.planetGhostDistLabels.get(pp.name);
       if (gDistLabel) {
         const gpBeamDir = planetScenePos.clone().normalize();
+        const gpCamDist = this.camera.position.distanceTo(planetScenePos);
+        const gpVFov = this.camera.fov * Math.PI / 180;
+        const gpPx = gpCamDist * Math.tan(gpVFov / 2);
         const gpCamRight = new THREE.Vector3().crossVectors(this.camera.up, gpBeamDir).normalize();
         const gpBelowDir = new THREE.Vector3().crossVectors(gpBeamDir, gpCamRight).normalize();
         if (gpBelowDir.dot(this.camera.up) > 0) gpBelowDir.negate();
-        const mid = planetScenePos.clone().sub(gpBeamDir.clone().multiplyScalar(3));
-        mid.add(gpBelowDir.multiplyScalar(1.2));
+        const mid = planetScenePos.clone().sub(gpBeamDir.clone().multiplyScalar(gpPx * 0.12));
+        mid.add(gpBelowDir.multiplyScalar(gpPx * 0.032));
         gDistLabel.position.copy(mid);
         const pKm = pp.distanceAU * 149597870.7;
         const pLightSec = pKm / 299792.458;
