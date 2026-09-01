@@ -860,6 +860,17 @@ canvas { display: block; }
   opacity: 0.5;
 }
 
+/* Lock-on reticle — targeting destination during navigation */
+.cm-lockon-reticle {
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.cm-lockon-reticle .cm-reticle-arc {
+  stroke-width: 2px;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 4px var(--hud-color, #fff));
+}
+
 /* Leader line */
 .cm-hud-line {
   position: absolute;

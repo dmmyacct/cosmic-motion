@@ -171,9 +171,7 @@ export class CosmicMotionApp {
   private isNavigating = false;
   private navStartCamPos = new THREE.Vector3();
   private navEndCamPos = new THREE.Vector3();
-  private navControlPt = new THREE.Vector3();
   private navStartTarget = new THREE.Vector3();
-  private navMidTarget = new THREE.Vector3();
   private navEndTarget = new THREE.Vector3();
   private navTime = 0;
   private navDuration = 2.0;
@@ -181,11 +179,10 @@ export class CosmicMotionApp {
   private navTargetBody = 'Earth';
   private navBodySwitched = false;
   private navFovBase = 55;
-  private navDeparturePos = new THREE.Vector3();
-  private navApproachPos = new THREE.Vector3();
-  private navCubicCtrl1 = new THREE.Vector3();
-  private navCubicCtrl2 = new THREE.Vector3();
-  private navDepartureTarget = new THREE.Vector3();
+  private navChargeEnd = new THREE.Vector3();
+  private navFinalCamPos = new THREE.Vector3();
+  private navLockOnSpin = 0;
+  private lockOnReticle!: SVGSVGElement;
   private hudOverlay!: HTMLElement;
   private hudCard!: HTMLElement;
   private hudReticle!: SVGSVGElement;
@@ -1291,8 +1288,8 @@ export class CosmicMotionApp {
     this.navTargetBody = bodyName;
     this.navBodySwitched = false;
     this.navFovBase = this.camera.fov;
+    this.navLockOnSpin = 0;
 
-    const departurePos = this.getBodyScenePos(this.previousBody);
     const targetPos = this.getBodyScenePos(bodyName);
     const sunPos = this.sunMesh.position.clone();
 
@@ -1308,70 +1305,36 @@ export class CosmicMotionApp {
         ? MOON_DIST * 1.5
         : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
 
-    // Arrival angle: blend approach direction with anti-Sun for lit-side viewing
-    const approachDir = this.camera.position.clone().sub(targetPos).normalize();
-    const litSideDir = sunDir.clone().negate();
-    const arrivalDir = litSideDir.clone().lerp(approachDir, 0.3).normalize();
     const up = new THREE.Vector3(0, 1, 0);
 
-    this.navEndCamPos.copy(targetPos)
-      .add(arrivalDir.clone().multiplyScalar(viewDist))
-      .add(up.clone().multiplyScalar(viewDist * 0.25));
+    // Charge end: arrive on a direct line from camera to target, at viewDist
+    const chargeDir = targetPos.clone().sub(this.camera.position).normalize();
+    this.navChargeEnd.copy(targetPos).add(chargeDir.clone().negate().multiplyScalar(viewDist));
 
-    // Approach point: slightly above and further out than the final orbit —
-    // the Bezier arc ends here, then phase 3 settles into the final position
-    this.navApproachPos.copy(targetPos)
-      .add(arrivalDir.clone().multiplyScalar(viewDist * 2.0))
-      .add(up.clone().multiplyScalar(viewDist * 0.8));
+    // Sun-oriented final position: anti-Sun side with slight elevation
+    const litSideDir = sunDir.clone().negate();
+    if (bodyName === 'Sun') {
+      this.navFinalCamPos.copy(this.navChargeEnd);
+    } else {
+      this.navFinalCamPos.copy(targetPos)
+        .add(litSideDir.clone().multiplyScalar(viewDist))
+        .add(up.clone().multiplyScalar(viewDist * 0.25));
+    }
 
     this.navEndTarget.copy(targetPos);
     this.navStartCamPos.copy(this.camera.position);
     this.navStartTarget.copy(this.controls.target);
-
-    // Phase 1 departure: gentle pull-back along the view direction
-    const viewDir = this.controls.target.clone().sub(this.camera.position).normalize();
-    const depDist = this.camera.position.distanceTo(departurePos);
-    const pullBack = Math.max(viewDist * 0.3, depDist * 0.12);
-    this.navDeparturePos.copy(this.camera.position).add(viewDir.clone().multiplyScalar(-pullBack));
-    this.navDepartureTarget.copy(departurePos);
-
-    // Smart arc: use the orbital plane normal to determine arc direction
-    const travelDist = this.navDeparturePos.distanceTo(this.navApproachPos);
-    const d1 = departurePos.clone().normalize();
-    const d2 = targetPos.clone().normalize();
-    const arcNormal = new THREE.Vector3().crossVectors(d1, d2);
-    const arcNormalLen = arcNormal.length();
-
-    let liftDir: THREE.Vector3;
-    if (arcNormalLen < 0.001) {
-      liftDir = up.clone();
-    } else {
-      arcNormal.normalize();
-      if (arcNormal.y < 0) arcNormal.negate();
-      liftDir = arcNormal;
-    }
-
-    // Angular separation determines arc drama
-    const angularSep = Math.acos(Math.max(-1, Math.min(1, d1.dot(d2))));
-    const arcMag = travelDist * (0.10 + 0.25 * (angularSep / Math.PI));
-
-    // Cubic Bezier control points: distributed at 1/3 and 2/3 with lift
-    const ctrl1Pos = this.navDeparturePos.clone().lerp(this.navApproachPos, 0.33);
-    ctrl1Pos.add(liftDir.clone().multiplyScalar(arcMag));
-    this.navCubicCtrl1.copy(ctrl1Pos);
-
-    const ctrl2Pos = this.navDeparturePos.clone().lerp(this.navApproachPos, 0.67);
-    ctrl2Pos.add(liftDir.clone().multiplyScalar(arcMag * 0.6));
-    this.navCubicCtrl2.copy(ctrl2Pos);
+    this.navEndCamPos.copy(this.navFinalCamPos);
 
     this.isNavigating = true;
     this.navTime = 0;
 
-    // Adaptive duration: angular separation + distance-based
+    // Adaptive duration: distance-based
+    const travelDist = this.camera.position.distanceTo(targetPos);
     const baseDuration = bodyName === 'Moon' || this.previousBody === 'Moon'
-      ? 1.2
-      : 1.5 + angularSep * 1.8 + Math.log2(1 + travelDist / 20) * 0.6;
-    this.navDuration = Math.max(0.8, Math.min(6.0, baseDuration));
+      ? 1.8
+      : 1.0 + Math.log2(1 + travelDist / 20) * 1.2;
+    this.navDuration = Math.max(1.5, Math.min(7.0, baseDuration));
     this.controls.enabled = false;
   }
 
@@ -2344,6 +2307,21 @@ export class CosmicMotionApp {
     `;
     this.hudOverlay.appendChild(this.hudReticle);
 
+    // Lock-on reticle — appears on the destination body during navigation
+    this.lockOnReticle = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.lockOnReticle.classList.add('cm-hud-reticle', 'cm-lockon-reticle');
+    this.lockOnReticle.setAttribute('viewBox', '-50 -50 100 100');
+    this.lockOnReticle.innerHTML = `
+      <g class="cm-reticle-spin">
+        <path d="M 0,-42 A 42,42 0 0,1 36.37,-21" class="cm-reticle-arc"/>
+        <path d="M 42,0 A 42,42 0 0,1 21,36.37" class="cm-reticle-arc"/>
+        <path d="M 0,42 A 42,42 0 0,1 -36.37,21" class="cm-reticle-arc"/>
+        <path d="M -42,0 A 42,42 0 0,1 -21,-36.37" class="cm-reticle-arc"/>
+      </g>
+    `;
+    this.lockOnReticle.style.opacity = '0';
+    this.hudOverlay.appendChild(this.lockOnReticle);
+
     // Leader line SVG — full viewport, draws the elbow line
     this.hudLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.hudLine.classList.add('cm-hud-line');
@@ -2546,7 +2524,7 @@ export class CosmicMotionApp {
     const sy = (-screenPos.y * 0.5 + 0.5) * h;
     const behind = screenPos.z > 1;
 
-    // Fade logic — integrated with three-phase navigation
+    // Fade logic — integrated with four-phase navigation
     if (this.currentBody !== this.hudLastBody) {
       this.hudLastBody = this.currentBody;
       this.hudVisible = true;
@@ -2556,10 +2534,12 @@ export class CosmicMotionApp {
       this.updateHUDContent();
     }
 
-    // During navigation: fade out departure HUD before body switch
+    // During navigation: fade out departure HUD during aim phase,
+    // new HUD fades in after body switch at end of lock-on phase
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
+        // Fade out over the aim phase (0-20%)
         this.hudTargetOpacity = Math.max(0, 1 - tg * 5);
       }
     }
@@ -2604,6 +2584,48 @@ export class CosmicMotionApp {
     // Rotate arcs via JS (not CSS animation, for reliability)
     const spin = this.hudReticle.querySelector('.cm-reticle-spin') as SVGGElement;
     if (spin) spin.setAttribute('transform', `rotate(${(performance.now() * 0.03) % 360})`);
+
+    // Lock-on reticle: visible during nav aim/lock-on, tracks the destination body
+    if (this.isNavigating && this.navLockOnSpin >= 0) {
+      const destBodyPos = this.getBodyScenePos(this.navTargetBody);
+      const destScreen = destBodyPos.clone().project(this.camera);
+      const dsx = (destScreen.x * 0.5 + 0.5) * w;
+      const dsy = (-destScreen.y * 0.5 + 0.5) * h;
+      const destBehind = destScreen.z > 1;
+
+      const tg = Math.min(1, this.navTime / this.navDuration);
+      // Visible during aim + lock-on (phases 1-2), fade out at charge start
+      const lockVis = tg < 0.20
+        ? Math.min(1, tg / 0.05)
+        : tg < 0.30
+          ? 1
+          : Math.max(0, 1 - (tg - 0.30) / 0.05);
+
+      // Spin speed ramps up during lock-on
+      const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
+      const lockSpin = this.lockOnReticle.querySelector('.cm-reticle-spin') as SVGGElement;
+      if (lockSpin) lockSpin.setAttribute('transform', `rotate(${(performance.now() * spinSpeed) % 360})`);
+
+      // Scale pulse during lock-on
+      const scalePulse = this.navLockOnSpin > 0
+        ? 1 + 0.2 * Math.sin(this.navLockOnSpin * Math.PI)
+        : 1;
+      const lockSize = 70 * scalePulse;
+      const lockHalf = lockSize / 2;
+      this.lockOnReticle.style.width = `${lockSize}px`;
+      this.lockOnReticle.style.height = `${lockSize}px`;
+      this.lockOnReticle.style.transform = `translate(${dsx - lockHalf}px, ${dsy - lockHalf}px)`;
+      this.lockOnReticle.style.opacity = destBehind ? '0' : String(lockVis);
+
+      // Color: use the destination body's color
+      const destPlanet = PLANETS.find(p => p.name === this.navTargetBody);
+      const lockColor = this.navTargetBody === 'Sun' ? '#ffd54f'
+        : this.navTargetBody === 'Moon' ? '#b0b0aa'
+        : (destPlanet?.color ?? '#ffffff');
+      this.lockOnReticle.style.setProperty('--hud-color', lockColor);
+    } else {
+      this.lockOnReticle.style.opacity = '0';
+    }
 
     // Card position — offset to upper-right of planet, clamped to viewport
     const cardW = 200;
@@ -3964,87 +3986,122 @@ export class CosmicMotionApp {
     for (const l of this.planetGhostDistLabels.values()) this.scaleDistLabel(l);
     for (const l of this.planetTravelLabels.values()) this.scaleDistLabel(l);
 
-    // Navigation animation — three-phase cinematic transition
+    // Navigation animation — four-phase target-and-charge
     if (this.isNavigating) {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.15;  // departure phase ends
-      const P2_END = 0.85;  // transit phase ends
+      const P1_END = 0.20;  // aim phase ends
+      const P2_END = 0.30;  // lock-on phase ends
+      const P3_END = 0.80;  // charge phase ends
+      // Phase 4: 0.80–1.00 — Sun orient
 
-      // Deferred body switch at the midpoint
-      if (tGlobal >= 0.50 && !this.navBodySwitched) {
+      // Body switch at end of lock-on phase
+      if (tGlobal >= P2_END && !this.navBodySwitched) {
         this.navBodySwitched = true;
         this.currentBody = this.navTargetBody;
         if (this.currentBody === 'Earth') this.moonHudVisible = true;
       }
 
-      // FOV breathing: gentle widening during transit, eases back on approach
-      const fovPeak = 5;
-      let fovOffset: number;
-      if (tGlobal < P1_END) {
-        const pt = tGlobal / P1_END;
-        fovOffset = fovPeak * pt * pt;
-      } else if (tGlobal < P2_END) {
-        fovOffset = fovPeak;
-      } else {
-        const ap = (tGlobal - P2_END) / (1 - P2_END);
-        fovOffset = fovPeak * (1 - ap * ap);
+      // FOV breathing: only during the charge phase
+      const fovPeak = 4;
+      let fovOffset = 0;
+      if (tGlobal >= P2_END && tGlobal < P3_END) {
+        const pt = (tGlobal - P2_END) / (P3_END - P2_END);
+        fovOffset = fovPeak * Math.sin(pt * Math.PI);
+      } else if (tGlobal >= P3_END) {
+        const pt = (tGlobal - P3_END) / (1 - P3_END);
+        fovOffset = fovPeak * 0.3 * (1 - pt);
       }
       this.camera.fov = this.navFovBase + fovOffset;
       this.camera.updateProjectionMatrix();
 
+      // Update destination position each frame (bodies move)
+      const destPos = this.getBodyScenePos(this.navTargetBody);
+
       if (tGlobal < P1_END) {
-        // Phase 1 — Departure: gentle pull-back from the current body
+        // Phase 1 — Aim: camera stays put, view rotates toward target
         const pt = tGlobal / P1_END;
-        const ease = 1 - Math.pow(1 - pt, 3);
-        this.camera.position.lerpVectors(this.navStartCamPos, this.navDeparturePos, ease);
-        this.controls.target.lerpVectors(this.navStartTarget, this.navDepartureTarget, ease);
+        const ease = pt * pt * (3 - 2 * pt); // smoothstep
+        this.controls.target.lerpVectors(this.navStartTarget, destPos, ease);
 
       } else if (tGlobal < P2_END) {
-        // Phase 2 — Transit: cubic Bezier arc ending at the approach point
+        // Phase 2 — Lock-on: camera still stationary, reticle effect
+        this.controls.target.copy(destPos);
         const pt = (tGlobal - P1_END) / (P2_END - P1_END);
+        this.navLockOnSpin = pt;
+
+      } else if (tGlobal < P3_END) {
+        // Phase 3 — Charge: straight line from current pos to close orbit
+        const pt = (tGlobal - P2_END) / (P3_END - P2_END);
+        // Quintic ease-in-out for dramatic acceleration/deceleration
         const ease = pt < 0.5
-          ? 4 * pt * pt * pt
-          : 1 - Math.pow(-2 * pt + 2, 3) / 2;
+          ? 16 * pt * pt * pt * pt * pt
+          : 1 - Math.pow(-2 * pt + 2, 5) / 2;
 
-        // Cubic Bezier: departure → ctrl1 → ctrl2 → approachPos
-        const omt = 1 - ease;
-        const a = omt * omt * omt;
-        const b = 3 * omt * omt * ease;
-        const c = 3 * omt * ease * ease;
-        const d = ease * ease * ease;
-        this.camera.position.set(
-          a * this.navDeparturePos.x + b * this.navCubicCtrl1.x + c * this.navCubicCtrl2.x + d * this.navApproachPos.x,
-          a * this.navDeparturePos.y + b * this.navCubicCtrl1.y + c * this.navCubicCtrl2.y + d * this.navApproachPos.y,
-          a * this.navDeparturePos.z + b * this.navCubicCtrl1.z + c * this.navCubicCtrl2.z + d * this.navApproachPos.z,
-        );
+        // Recompute charge end each frame to track moving body
+        const chargeDir = destPos.clone().sub(this.navStartCamPos).normalize();
+        const trueR = this.bodyTrueRadius(this.navTargetBody);
+        const sunPos = this.sunMesh.position.clone();
+        const dts = sunPos.distanceTo(destPos);
+        const viewDist = this.navTargetBody === 'Sun'
+          ? Math.max(trueR * 8, trueR * 5)
+          : this.navTargetBody === 'Moon'
+            ? MOON_DIST * 1.5
+            : Math.max(trueR * 8, Math.min(dts * 0.15, trueR * 30));
+        this.navChargeEnd.copy(destPos).add(chargeDir.clone().negate().multiplyScalar(viewDist));
 
-        // Look target: smooth crossfade from departure body to destination
-        const destPos = this.getBodyScenePos(this.navTargetBody);
-        const lookEase = pt * pt * (3 - 2 * pt);
-        this.controls.target.lerpVectors(this.navDepartureTarget, destPos, lookEase);
+        this.camera.position.lerpVectors(this.navStartCamPos, this.navChargeEnd, ease);
+        this.controls.target.copy(destPos);
 
       } else {
-        // Phase 3 — Approach: decelerate from the approach point into final orbit
-        const pt = (tGlobal - P2_END) / (1 - P2_END);
+        // Phase 4 — Sun orient: orbit around the body to Sun-facing view
+        const pt = (tGlobal - P3_END) / (1 - P3_END);
         const ease = pt * pt * (3 - 2 * pt);
-        this.camera.position.lerpVectors(this.navApproachPos, this.navEndCamPos, ease);
 
-        // Track the live destination position for a precise lock-on
-        const destPos = this.getBodyScenePos(this.navTargetBody);
-        this.controls.target.lerpVectors(this.controls.target, destPos, 0.08 + ease * 0.2);
+        if (this.navTargetBody === 'Sun') {
+          this.camera.position.lerp(this.navChargeEnd, 0.1);
+        } else {
+          // Recompute Sun-oriented final position with live body pos
+          const sunPos = this.sunMesh.position.clone();
+          const toSun = sunPos.clone().sub(destPos);
+          const dts = toSun.length();
+          const sunDir = dts > 0.01 ? toSun.clone().normalize() : new THREE.Vector3(1, 0, 0);
+          const litSide = sunDir.clone().negate();
+          const up = new THREE.Vector3(0, 1, 0);
+          const trueR = this.bodyTrueRadius(this.navTargetBody);
+          const viewDist = this.navTargetBody === 'Moon'
+            ? MOON_DIST * 1.5
+            : Math.max(trueR * 8, Math.min(dts * 0.15, trueR * 30));
+          const finalPos = destPos.clone()
+            .add(litSide.multiplyScalar(viewDist))
+            .add(up.multiplyScalar(viewDist * 0.25));
+
+          // Spherical interpolation: orbit around the body at constant-ish distance
+          const currentOffset = this.camera.position.clone().sub(destPos);
+          const targetOffset = finalPos.clone().sub(destPos);
+          const currentDist = currentOffset.length();
+          const targetDist = targetOffset.length();
+          const dist = currentDist + (targetDist - currentDist) * ease;
+          currentOffset.normalize();
+          targetOffset.normalize();
+          // Slerp the direction
+          const slerpDir = currentOffset.clone().lerp(targetOffset, ease).normalize();
+          this.camera.position.copy(destPos).add(slerpDir.multiplyScalar(dist));
+        }
+        this.controls.target.copy(destPos);
+        this.navLockOnSpin = 0;
       }
 
       if (tGlobal >= 0.999) {
         this.isNavigating = false;
         this.navBodySwitched = false;
+        this.navLockOnSpin = 0;
         this.controls.enabled = true;
         this.controls.target.copy(this.navEndTarget);
         this.camera.position.copy(this.navEndCamPos);
         this.camera.fov = this.navFovBase;
         this.camera.updateProjectionMatrix();
-        // Ensure body is switched even for very short navigations
         if (this.currentBody !== this.navTargetBody) {
           this.currentBody = this.navTargetBody;
         }
