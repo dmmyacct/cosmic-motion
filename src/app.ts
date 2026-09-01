@@ -1335,13 +1335,13 @@ export class CosmicMotionApp {
     const travelAU = travelDist / AU_SCENE;
     let baseDuration: number;
     if (bodyName === 'Moon' || this.previousBody === 'Moon') {
-      baseDuration = 2.5;
+      baseDuration = 3.5;
     } else if (travelAU < 1) {
-      baseDuration = 3.0 + travelAU * 2.0;
+      baseDuration = 5.0 + travelAU * 2.0;
     } else {
-      baseDuration = 4.0 + Math.sqrt(travelAU) * 2.0;
+      baseDuration = 6.0 + Math.sqrt(travelAU) * 2.5;
     }
-    this.navDuration = Math.max(2.5, Math.min(14.0, baseDuration));
+    this.navDuration = Math.max(4.0, Math.min(20.0, baseDuration));
     this.controls.enabled = false;
   }
 
@@ -2546,8 +2546,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-12%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 8);
+        // Fade out over the aim phase (0-22%)
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 4.5);
       }
     }
 
@@ -2602,11 +2602,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.12
-        ? Math.min(1, tg / 0.04)
-        : tg < 0.16
+      const lockVis = tg < 0.22
+        ? Math.min(1, tg / 0.06)
+        : tg < 0.26
           ? 1
-          : Math.max(0, 1 - (tg - 0.16) / 0.05);
+          : Math.max(0, 1 - (tg - 0.26) / 0.05);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -3998,10 +3998,10 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.12;  // aim phase ends
-      const P2_END = 0.16;  // lock-on phase ends
-      const P3_END = 0.75;  // charge phase ends
-      // Phase 4: 0.75–1.00 — Sun orient
+      const P1_END = 0.22;  // aim phase ends
+      const P2_END = 0.26;  // lock-on phase ends
+      const P3_END = 0.60;  // charge phase ends
+      // Phase 4: 0.60–1.00 — Sun orient
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {
@@ -4027,10 +4027,9 @@ export class CosmicMotionApp {
       const destPos = this.getBodyScenePos(this.navTargetBody);
 
       if (tGlobal < P1_END) {
-        // Phase 1 — Aim: camera stays put, view drifts gently toward target
+        // Phase 1 — Aim: camera stays put, view drifts slowly toward target
         const pt = tGlobal / P1_END;
-        // Very gentle exponential ease — mostly slow, accelerates only at the end
-        const ease = pt * pt * pt;
+        const ease = pt * pt * pt * pt; // quartic — very slow start
         this.controls.target.lerpVectors(this.navStartTarget, destPos, ease);
 
       } else if (tGlobal < P2_END) {
@@ -4062,10 +4061,10 @@ export class CosmicMotionApp {
         this.controls.target.copy(destPos);
 
       } else {
-        // Phase 4 — Sun orient: gently orbit left/right around the body
+        // Phase 4 — Sun orient: slowly orbit left/right around the body
         // until the Sun is reasonably in view. Never flip — preserve our up.
         const pt = (tGlobal - P3_END) / (1 - P3_END);
-        const ease = pt * pt * (3 - 2 * pt);
+        const ease = pt * pt * pt; // cubic — slow and deliberate
 
         if (this.navTargetBody === 'Sun') {
           this.camera.position.lerp(this.navChargeEnd, 0.1);
