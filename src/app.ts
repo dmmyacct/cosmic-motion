@@ -178,6 +178,13 @@ export class CosmicMotionApp {
   private navTime = 0;
   private navDuration = 2.0;
   private currentBody = 'Earth';
+  private navTargetBody = 'Earth';
+  private navBodySwitched = false;
+  private navFovBase = 55;
+  private navDeparturePos = new THREE.Vector3();
+  private navCubicCtrl1 = new THREE.Vector3();
+  private navCubicCtrl2 = new THREE.Vector3();
+  private navDepartureTarget = new THREE.Vector3();
   private hudOverlay!: HTMLElement;
   private hudCard!: HTMLElement;
   private hudReticle!: SVGSVGElement;
@@ -1264,9 +1271,15 @@ export class CosmicMotionApp {
   }
 
   navigateToBody(bodyName: string): void {
-    if (bodyName === this.currentBody || this.isNavigating) return;
+    if (bodyName === this.currentBody && !this.isNavigating) return;
+    if (this.isNavigating && bodyName === this.navTargetBody) return;
 
     if (bodyName !== 'Moon') this.ui.exitDrillDown();
+
+    // If mid-flight, snap currentBody to wherever we were headed
+    if (this.isNavigating && !this.navBodySwitched) {
+      this.currentBody = this.navTargetBody;
+    }
 
     this.flightLocked = true;
     this.flightMouseDown = false;
@@ -1274,15 +1287,17 @@ export class CosmicMotionApp {
     this.controls.enabled = true;
 
     this.previousBody = this.currentBody;
-    this.currentBody = bodyName;
+    this.navTargetBody = bodyName;
+    this.navBodySwitched = false;
+    this.navFovBase = this.camera.fov;
 
+    const departurePos = this.getBodyScenePos(this.previousBody);
     const targetPos = this.getBodyScenePos(bodyName);
     const sunPos = this.sunMesh.position.clone();
 
     const toSun = sunPos.clone().sub(targetPos);
     const distToSun = toSun.length();
     const sunDir = distToSun > 0.01 ? toSun.clone().normalize() : new THREE.Vector3(1, 0, 0);
-    const up = new THREE.Vector3(0, 1, 0);
 
     const trueR = this.bodyTrueRadius(bodyName);
 
@@ -1292,27 +1307,66 @@ export class CosmicMotionApp {
         ? MOON_DIST * 1.5
         : Math.max(trueR * 8, Math.min(distToSun * 0.15, trueR * 30));
 
+    // Arrival angle: blend approach direction with anti-Sun for lit-side viewing
+    const approachDir = this.camera.position.clone().sub(targetPos).normalize();
+    const litSideDir = sunDir.clone().negate();
+    const arrivalDir = litSideDir.clone().lerp(approachDir, 0.3).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+
     this.navEndCamPos.copy(targetPos)
-      .add(sunDir.clone().multiplyScalar(-viewDist))
-      .add(up.clone().multiplyScalar(viewDist * 0.35));
+      .add(arrivalDir.multiplyScalar(viewDist))
+      .add(up.clone().multiplyScalar(viewDist * 0.3));
 
     this.navEndTarget.copy(targetPos);
     this.navStartCamPos.copy(this.camera.position);
     this.navStartTarget.copy(this.controls.target);
-    this.navMidTarget.copy(sunPos);
 
-    // Quadratic Bezier control point: midpoint lifted above the ecliptic plane
-    // for a sweeping arc that gives spatial context during transit
-    const mid = this.navStartCamPos.clone().lerp(this.navEndCamPos, 0.5);
-    const travelDist = this.navStartCamPos.distanceTo(this.navEndCamPos);
-    const arcHeight = Math.max(travelDist * 0.25, viewDist * 2);
-    mid.y += arcHeight;
-    this.navControlPt.copy(mid);
+    // Phase 1 departure: pull back along the view direction
+    const viewDir = this.controls.target.clone().sub(this.camera.position).normalize();
+    const depTrueR = this.bodyTrueRadius(this.previousBody);
+    const depDist = this.camera.position.distanceTo(departurePos);
+    const pullBack = Math.max(depTrueR * 3, depDist * 0.4);
+    this.navDeparturePos.copy(this.camera.position).add(viewDir.clone().multiplyScalar(-pullBack));
+    this.navDepartureTarget.copy(departurePos);
+
+    // Smart arc: use the orbital plane normal to determine arc direction
+    const travelDist = this.navDeparturePos.distanceTo(this.navEndCamPos);
+    const d1 = departurePos.clone().normalize();
+    const d2 = targetPos.clone().normalize();
+    const arcNormal = new THREE.Vector3().crossVectors(d1, d2);
+    const arcNormalLen = arcNormal.length();
+
+    let liftDir: THREE.Vector3;
+    if (arcNormalLen < 0.001) {
+      liftDir = up.clone();
+    } else {
+      arcNormal.normalize();
+      // Ensure consistent lift direction (always lift toward +Y side)
+      if (arcNormal.y < 0) arcNormal.negate();
+      liftDir = arcNormal;
+    }
+
+    // Angular separation determines arc drama
+    const angularSep = Math.acos(Math.max(-1, Math.min(1, d1.dot(d2))));
+    const arcMag = travelDist * (0.08 + 0.20 * (angularSep / Math.PI));
+
+    // Cubic Bezier control points: distributed at 1/3 and 2/3 with lift
+    const ctrl1Pos = this.navDeparturePos.clone().lerp(this.navEndCamPos, 0.33);
+    ctrl1Pos.add(liftDir.clone().multiplyScalar(arcMag));
+    this.navCubicCtrl1.copy(ctrl1Pos);
+
+    const ctrl2Pos = this.navDeparturePos.clone().lerp(this.navEndCamPos, 0.67);
+    ctrl2Pos.add(liftDir.clone().multiplyScalar(arcMag * 0.7));
+    this.navCubicCtrl2.copy(ctrl2Pos);
 
     this.isNavigating = true;
     this.navTime = 0;
 
-    this.navDuration = Math.max(2.0, Math.min(5.0, 1.2 + Math.log2(1 + travelDist / 10) * 0.8));
+    // Adaptive duration: angular separation + distance-based
+    const baseDuration = bodyName === 'Moon' || this.previousBody === 'Moon'
+      ? 1.2
+      : 1.5 + angularSep * 1.8 + Math.log2(1 + travelDist / 20) * 0.6;
+    this.navDuration = Math.max(0.8, Math.min(6.0, baseDuration));
     this.controls.enabled = false;
   }
 
@@ -2487,7 +2541,7 @@ export class CosmicMotionApp {
     const sy = (-screenPos.y * 0.5 + 0.5) * h;
     const behind = screenPos.z > 1;
 
-    // Fade logic
+    // Fade logic — integrated with three-phase navigation
     if (this.currentBody !== this.hudLastBody) {
       this.hudLastBody = this.currentBody;
       this.hudVisible = true;
@@ -2497,7 +2551,15 @@ export class CosmicMotionApp {
       this.updateHUDContent();
     }
 
-    const fadeSpeed = 0.08;
+    // During navigation: fade out departure HUD before body switch
+    if (this.isNavigating) {
+      const tg = Math.min(1, this.navTime / this.navDuration);
+      if (!this.navBodySwitched) {
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 5);
+      }
+    }
+
+    const fadeSpeed = this.isNavigating ? 0.15 : 0.08;
     this.hudOpacity += (this.hudTargetOpacity - this.hudOpacity) * fadeSpeed;
     const op = behind ? 0 : this.hudOpacity;
     this.hudOverlay.style.opacity = String(Math.max(0, Math.min(1, op)));
@@ -3897,38 +3959,92 @@ export class CosmicMotionApp {
     for (const l of this.planetGhostDistLabels.values()) this.scaleDistLabel(l);
     for (const l of this.planetTravelLabels.values()) this.scaleDistLabel(l);
 
-    // Navigation animation — Bezier arc with quintic ease
+    // Navigation animation — three-phase cinematic transition
     if (this.isNavigating) {
       this.navTime += delta;
-      const tRaw = Math.min(1, this.navTime / this.navDuration);
+      const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      // Quintic ease-in-out: very gentle start/stop, smooth mid-flight
-      const t = tRaw < 0.5
-        ? 16 * tRaw * tRaw * tRaw * tRaw * tRaw
-        : 1 - Math.pow(-2 * tRaw + 2, 5) / 2;
+      const P1_END = 0.15;  // departure phase ends
+      const P2_END = 0.85;  // transit phase ends
 
-      // Quadratic Bezier: P = (1-t)²·A + 2(1-t)t·C + t²·B
-      const omt = 1 - t;
-      this.camera.position.set(
-        omt * omt * this.navStartCamPos.x + 2 * omt * t * this.navControlPt.x + t * t * this.navEndCamPos.x,
-        omt * omt * this.navStartCamPos.y + 2 * omt * t * this.navControlPt.y + t * t * this.navEndCamPos.y,
-        omt * omt * this.navStartCamPos.z + 2 * omt * t * this.navControlPt.z + t * t * this.navEndCamPos.z,
-      );
+      // Deferred body switch at the midpoint
+      if (tGlobal >= 0.50 && !this.navBodySwitched) {
+        this.navBodySwitched = true;
+        this.currentBody = this.navTargetBody;
+        if (this.currentBody === 'Earth') this.moonHudVisible = true;
+      }
 
-      // Look target: Bezier through Sun — keeps the Sun in view as an anchor
-      // during transit, then settles smoothly on the destination
-      const omt2 = 1 - t;
-      this.controls.target.set(
-        omt2 * omt2 * this.navStartTarget.x + 2 * omt2 * t * this.navMidTarget.x + t * t * this.navEndTarget.x,
-        omt2 * omt2 * this.navStartTarget.y + 2 * omt2 * t * this.navMidTarget.y + t * t * this.navEndTarget.y,
-        omt2 * omt2 * this.navStartTarget.z + 2 * omt2 * t * this.navMidTarget.z + t * t * this.navEndTarget.z,
-      );
+      // FOV breathing: sine-shaped peak during transit
+      const fovPeak = 8;
+      let fovOffset: number;
+      if (tGlobal < P1_END) {
+        fovOffset = fovPeak * (tGlobal / P1_END);
+      } else if (tGlobal < P2_END) {
+        fovOffset = fovPeak;
+      } else {
+        const ap = (tGlobal - P2_END) / (1 - P2_END);
+        fovOffset = fovPeak * (1 - ap * ap);
+      }
+      this.camera.fov = this.navFovBase + fovOffset;
+      this.camera.updateProjectionMatrix();
 
-      if (tRaw >= 0.999) {
+      if (tGlobal < P1_END) {
+        // Phase 1 — Departure: pull back from the current body
+        const pt = tGlobal / P1_END;
+        const ease = 1 - Math.pow(1 - pt, 3); // cubic ease-out
+        this.camera.position.lerpVectors(this.navStartCamPos, this.navDeparturePos, ease);
+        this.controls.target.lerpVectors(this.navStartTarget, this.navDepartureTarget, ease);
+
+      } else if (tGlobal < P2_END) {
+        // Phase 2 — Transit: cubic Bezier arc with smooth look-target crossfade
+        const pt = (tGlobal - P1_END) / (P2_END - P1_END);
+        const ease = pt < 0.5
+          ? 4 * pt * pt * pt
+          : 1 - Math.pow(-2 * pt + 2, 3) / 2;
+
+        // Cubic Bezier: P = (1-t)³A + 3(1-t)²tB + 3(1-t)t²C + t³D
+        const omt = 1 - ease;
+        const a = omt * omt * omt;
+        const b = 3 * omt * omt * ease;
+        const c = 3 * omt * ease * ease;
+        const d = ease * ease * ease;
+        this.camera.position.set(
+          a * this.navDeparturePos.x + b * this.navCubicCtrl1.x + c * this.navCubicCtrl2.x + d * this.navEndCamPos.x,
+          a * this.navDeparturePos.y + b * this.navCubicCtrl1.y + c * this.navCubicCtrl2.y + d * this.navEndCamPos.y,
+          a * this.navDeparturePos.z + b * this.navCubicCtrl1.z + c * this.navCubicCtrl2.z + d * this.navEndCamPos.z,
+        );
+
+        // Look target: smooth crossfade from departure body to destination
+        const destPos = this.getBodyScenePos(this.navTargetBody);
+        const lookEase = pt * pt * (3 - 2 * pt); // smoothstep
+        this.controls.target.lerpVectors(this.navDepartureTarget, destPos, lookEase);
+
+      } else {
+        // Phase 3 — Approach: decelerate into final orbit position
+        const pt = (tGlobal - P2_END) / (1 - P2_END);
+        const ease = pt * pt * (3 - 2 * pt); // smoothstep
+        this.camera.position.lerpVectors(this.navEndCamPos, this.navEndCamPos, ease);
+
+        // Settle the look target precisely on the destination
+        const destPos = this.getBodyScenePos(this.navTargetBody);
+        this.controls.target.lerpVectors(this.controls.target, destPos, 0.15);
+
+        // Smooth final camera convergence
+        this.camera.position.lerp(this.navEndCamPos, ease);
+      }
+
+      if (tGlobal >= 0.999) {
         this.isNavigating = false;
+        this.navBodySwitched = false;
         this.controls.enabled = true;
         this.controls.target.copy(this.navEndTarget);
         this.camera.position.copy(this.navEndCamPos);
+        this.camera.fov = this.navFovBase;
+        this.camera.updateProjectionMatrix();
+        // Ensure body is switched even for very short navigations
+        if (this.currentBody !== this.navTargetBody) {
+          this.currentBody = this.navTargetBody;
+        }
       }
     }
 
