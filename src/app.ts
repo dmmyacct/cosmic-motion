@@ -2852,13 +2852,18 @@ export class CosmicMotionApp {
         let py = dx;
         if (py < 0) { px = -px; py = -py; }
 
-        // Place the text well along the beam toward Sun, tight under the line
-        const along = 80;
-        const below = 5;
+        // Anchor near the body, just under the beam, extending toward Sun
+        const along = 25;
+        const below = 4;
         const ix = bx + dx * along + px * below;
         const iy = by + dy * along + py * below;
 
-        this.beamInfoEl.style.transform = `translate(${ix}px, ${iy}px)`;
+        // Align text so it extends toward the Sun along the beam
+        const sunIsRight = dx > 0;
+        this.beamInfoEl.style.textAlign = sunIsRight ? 'left' : 'right';
+        this.beamInfoEl.style.transform = sunIsRight
+          ? `translate(${ix}px, ${iy}px)`
+          : `translate(${ix}px, ${iy}px) translateX(-100%)`;
         this.beamInfoEl.style.opacity = '1';
       } else {
         this.beamInfoEl.style.opacity = '0';
