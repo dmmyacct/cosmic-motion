@@ -182,6 +182,10 @@ export class CosmicMotionApp {
   private navChargeEnd = new THREE.Vector3();
   private navFinalCamPos = new THREE.Vector3();
   private navLockOnSpin = 0;
+  private navTripDistKm = 0;
+  private navTripSpeedC = 0;
+  private navTripEta = '';
+  private tripCard!: HTMLElement;
   private lockOnReticle!: SVGSVGElement;
   private hudOverlay!: HTMLElement;
   private hudCard!: HTMLElement;
@@ -1343,6 +1347,45 @@ export class CosmicMotionApp {
     }
     this.navDuration = Math.max(4.0, Math.min(20.0, baseDuration));
     this.controls.enabled = false;
+
+    const P2_END = 0.30;
+    const P3_END = 0.62;
+    this.navTripDistKm = travelAU * AU_KM_VAL;
+    const chargeSec = this.navDuration * (P3_END - P2_END);
+    this.navTripSpeedC = this.navTripDistKm / Math.max(0.01, chargeSec) / 299792.458;
+
+    const etaSec = this.navDuration * (1 - P2_END);
+    this.navTripEta = etaSec >= 10
+      ? `${etaSec.toFixed(0)}s`
+      : `${etaSec.toFixed(1)}s`;
+
+    const destLabel = bodyName.toUpperCase();
+    const distAU = travelAU;
+    const distKmStr = this.navTripDistKm >= 1e9
+      ? `${(this.navTripDistKm / 1e9).toFixed(0)}B km`
+      : this.navTripDistKm >= 1e6
+        ? `${(this.navTripDistKm / 1e6).toFixed(0)}M km`
+        : `${Math.round(this.navTripDistKm).toLocaleString()} km`;
+    const speedStr = this.navTripSpeedC >= 10
+      ? `${Math.round(this.navTripSpeedC).toLocaleString()}c`
+      : this.navTripSpeedC >= 1
+        ? `${this.navTripSpeedC.toFixed(1)}c`
+        : `${this.navTripSpeedC.toFixed(2)}c`;
+
+    const destEl = this.tripCard.querySelector('.cm-trip-dest') as HTMLElement;
+    const distEl = this.tripCard.querySelector('.cm-trip-dist') as HTMLElement;
+    const speedEl = this.tripCard.querySelector('.cm-trip-speed') as HTMLElement;
+    const etaEl = this.tripCard.querySelector('.cm-trip-eta') as HTMLElement;
+    if (destEl) destEl.textContent = destLabel;
+    if (distEl) distEl.textContent = `${distAU.toFixed(2)} AU \u2014 ${distKmStr}`;
+    if (speedEl) speedEl.textContent = speedStr;
+    if (etaEl) etaEl.textContent = this.navTripEta;
+
+    const destPlanet = PLANETS.find(p => p.name === bodyName);
+    const tripColor = bodyName === 'Sun' ? '#ffd54f'
+      : bodyName === 'Moon' ? '#b0b0aa'
+      : (destPlanet?.color ?? '#ffffff');
+    this.tripCard.style.setProperty('--hud-color', tripColor);
   }
 
   private setHoveredBody(name: string | null): void {
@@ -2329,6 +2372,16 @@ export class CosmicMotionApp {
     this.lockOnReticle.style.opacity = '0';
     this.hudOverlay.appendChild(this.lockOnReticle);
 
+    this.tripCard = document.createElement('div');
+    this.tripCard.className = 'cm-trip-card';
+    this.tripCard.innerHTML = `
+      <div class="cm-trip-dest"></div>
+      <div class="cm-trip-stat"><span class="cm-trip-label">DIST</span><span class="cm-trip-value cm-trip-dist"></span></div>
+      <div class="cm-trip-stat"><span class="cm-trip-label">SPEED</span><span class="cm-trip-value cm-trip-speed"></span></div>
+      <div class="cm-trip-stat"><span class="cm-trip-label">ETA</span><span class="cm-trip-value cm-trip-eta"></span></div>
+    `;
+    this.hudOverlay.appendChild(this.tripCard);
+
     // Leader line SVG — full viewport, draws the elbow line
     this.hudLine = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.hudLine.classList.add('cm-hud-line');
@@ -2546,8 +2599,8 @@ export class CosmicMotionApp {
     if (this.isNavigating) {
       const tg = Math.min(1, this.navTime / this.navDuration);
       if (!this.navBodySwitched) {
-        // Fade out over the aim phase (0-22%)
-        this.hudTargetOpacity = Math.max(0, 1 - tg * 4.5);
+        // Fade out over the aim phase (0-18%)
+        this.hudTargetOpacity = Math.max(0, 1 - tg * 5.5);
       }
     }
 
@@ -2602,11 +2655,11 @@ export class CosmicMotionApp {
 
       const tg = Math.min(1, this.navTime / this.navDuration);
       // Visible during aim + lock-on (phases 1-2), fade out at charge start
-      const lockVis = tg < 0.22
+      const lockVis = tg < 0.18
         ? Math.min(1, tg / 0.06)
-        : tg < 0.26
+        : tg < 0.30
           ? 1
-          : Math.max(0, 1 - (tg - 0.26) / 0.05);
+          : Math.max(0, 1 - (tg - 0.30) / 0.05);
 
       // Spin speed ramps up during lock-on
       const spinSpeed = 0.03 + this.navLockOnSpin * 0.20;
@@ -2632,6 +2685,22 @@ export class CosmicMotionApp {
       this.lockOnReticle.style.setProperty('--hud-color', lockColor);
     } else {
       this.lockOnReticle.style.opacity = '0';
+    }
+
+    // Trip card: fade in during lock-on (18-30%), visible during charge (30-62%), fade out (62-67%)
+    if (this.isNavigating) {
+      const tg = Math.min(1, this.navTime / this.navDuration);
+      let tripOpacity = 0;
+      if (tg >= 0.18 && tg < 0.30) {
+        tripOpacity = Math.min(1, (tg - 0.18) / 0.04);
+      } else if (tg >= 0.30 && tg < 0.62) {
+        tripOpacity = 1;
+      } else if (tg >= 0.62 && tg < 0.67) {
+        tripOpacity = Math.max(0, 1 - (tg - 0.62) / 0.05);
+      }
+      this.tripCard.style.opacity = String(tripOpacity);
+    } else {
+      this.tripCard.style.opacity = '0';
     }
 
     // Card position — offset to upper-right of planet, clamped to viewport
@@ -3998,10 +4067,10 @@ export class CosmicMotionApp {
       this.navTime += delta;
       const tGlobal = Math.min(1, this.navTime / this.navDuration);
 
-      const P1_END = 0.22;  // aim phase ends
-      const P2_END = 0.26;  // lock-on phase ends
-      const P3_END = 0.60;  // charge phase ends
-      // Phase 4: 0.60–1.00 — Sun orient
+      const P1_END = 0.18;  // aim phase ends
+      const P2_END = 0.30;  // lock-on + trip card phase ends
+      const P3_END = 0.62;  // charge phase ends
+      // Phase 4: 0.62–1.00 — Sun orient
 
       // Body switch at end of lock-on phase
       if (tGlobal >= P2_END && !this.navBodySwitched) {

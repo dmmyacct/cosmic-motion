@@ -1209,3 +1209,57 @@ canvas { display: block; }
 .cm-nav-drilldown-ready .cm-nav-moon-label {
   fill: rgba(255, 255, 255, 0.3);
 }
+
+/* ── Trip Card ── */
+
+.cm-trip-card {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  padding: 10px 20px;
+  background: rgba(6, 8, 18, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 2px solid var(--hud-color, #fff);
+  border-radius: 6px;
+  backdrop-filter: blur(16px);
+  font-family: var(--font);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 30;
+  white-space: nowrap;
+}
+
+.cm-trip-dest {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--hud-color, #fff);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.cm-trip-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cm-trip-label {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.cm-trip-value {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
