@@ -204,7 +204,7 @@ export class CosmicMotionApp {
   private moonHudCard!: HTMLElement;
   private moonHudReticle!: SVGSVGElement;
   private moonHudLine!: SVGSVGElement;
-  private moonHudVisible = true;
+  private moonHudVisible = false;
   private moonHudOpacity = 0;
   private moonAxisLine!: THREE.Line;
   private moonSweep!: THREE.Group;
@@ -2620,7 +2620,6 @@ export class CosmicMotionApp {
       this.hudVisible = true;
       this.hudTargetOpacity = 1;
       this.hudOpacity = 0;
-      if (this.currentBody === 'Earth') this.moonHudVisible = true;
       this.updateHUDContent();
     }
 
@@ -4135,8 +4134,7 @@ export class CosmicMotionApp {
       if (tGlobal >= P2_END && !this.navBodySwitched) {
         this.navBodySwitched = true;
         this.currentBody = this.navTargetBody;
-        if (this.currentBody === 'Earth') this.moonHudVisible = true;
-      }
+        }
 
       // FOV breathing: only during the charge phase
       const fovPeak = 4;
