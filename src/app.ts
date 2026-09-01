@@ -1329,12 +1329,19 @@ export class CosmicMotionApp {
     this.isNavigating = true;
     this.navTime = 0;
 
-    // Adaptive duration: distance-based
+    // Adaptive duration: scales with distance so nearby hops feel quick
+    // and cross-system journeys feel like real voyages
     const travelDist = this.camera.position.distanceTo(targetPos);
-    const baseDuration = bodyName === 'Moon' || this.previousBody === 'Moon'
-      ? 2.5
-      : 1.8 + Math.log2(1 + travelDist / 20) * 1.2;
-    this.navDuration = Math.max(2.5, Math.min(8.0, baseDuration));
+    const travelAU = travelDist / AU_SCENE;
+    let baseDuration: number;
+    if (bodyName === 'Moon' || this.previousBody === 'Moon') {
+      baseDuration = 2.5;
+    } else if (travelAU < 1) {
+      baseDuration = 3.0 + travelAU * 2.0;
+    } else {
+      baseDuration = 4.0 + Math.sqrt(travelAU) * 2.0;
+    }
+    this.navDuration = Math.max(2.5, Math.min(14.0, baseDuration));
     this.controls.enabled = false;
   }
 
