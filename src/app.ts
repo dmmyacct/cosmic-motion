@@ -155,6 +155,8 @@ export class CosmicMotionApp {
   private hoveredBody: string | null = null;
   private showOrbits = true;
   private showTrajectories = false;
+  private showLabels = true;
+  private bodyLabels = new Map<string, HTMLElement>();
   private showAllBeams = false;
   private showTerminators = false;
   private earthTerminator!: THREE.LineLoop;
@@ -352,6 +354,9 @@ export class CosmicMotionApp {
       },
       onToggleTerminators: () => {
         this.showTerminators = !this.showTerminators;
+      },
+      onToggleLabels: () => {
+        this.showLabels = !this.showLabels;
       },
       onToggleFlightMode: () => {
         this.showFlightHint(6000);
@@ -2452,6 +2457,20 @@ export class CosmicMotionApp {
       this.moonHudVisible = false;
     });
 
+    const labelBodies = [
+      { name: 'Sun', color: '#ffd54f' },
+      { name: 'Moon', color: '#b0b0aa' },
+      ...PLANETS.map(p => ({ name: p.name, color: p.color })),
+    ];
+    for (const body of labelBodies) {
+      const el = document.createElement('div');
+      el.className = 'cm-body-label';
+      el.textContent = body.name.toUpperCase();
+      el.style.setProperty('--label-color', body.color);
+      this.hudOverlay.appendChild(el);
+      this.bodyLabels.set(body.name, el);
+    }
+
     this.buildPositionIndicator(container);
   }
 
@@ -2767,6 +2786,19 @@ export class CosmicMotionApp {
     this.hudReticle.style.setProperty('--hud-color', color);
     this.hudLine.style.setProperty('--hud-color', color);
     this.hudCard.style.setProperty('--hud-color', color);
+
+    // Body labels — fixed screen size, positioned by 3D projection
+    for (const [bodyName, el] of this.bodyLabels) {
+      if (!this.showLabels) { el.style.opacity = '0'; continue; }
+      const pos = this.getBodyScenePos(bodyName);
+      const screen = pos.clone().project(this.camera);
+      const behind = screen.z > 1;
+      if (behind) { el.style.opacity = '0'; continue; }
+      const lx = (screen.x * 0.5 + 0.5) * w;
+      const ly = (-screen.y * 0.5 + 0.5) * h;
+      el.style.transform = `translate(${lx}px, ${ly - 18}px)`;
+      el.style.opacity = '1';
+    }
   }
 
   private updateHUDContent(): void {

@@ -15,6 +15,7 @@ export interface UICallbacks {
   onToggleTrajectories: () => void;
   onToggleAllBeams: () => void;
   onToggleTerminators: () => void;
+  onToggleLabels: () => void;
   onToggleFlightMode: () => void;
   onFlightHover: (hovering: boolean) => void;
 }
@@ -281,6 +282,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-traj-btn" title="Toggle trajectories">∿</button>
       <button class="cm-beams-btn" title="Show all planet beams">☀</button>
       <button class="cm-term-btn" title="Toggle terminator lines">◐</button>
+      <button class="cm-labels-btn active" title="Toggle body labels">Aa</button>
       <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>
       <button class="cm-flight-btn" title="Free flight mode (V)">FLY</button>
       <button class="cm-reset-btn" title="Reset to now">↻</button>
@@ -301,6 +303,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   const trajBtn = timePanel.querySelector('.cm-traj-btn') as HTMLButtonElement;
   const beamsBtn = timePanel.querySelector('.cm-beams-btn') as HTMLButtonElement;
   const termBtn = timePanel.querySelector('.cm-term-btn') as HTMLButtonElement;
+  const labelsBtn = timePanel.querySelector('.cm-labels-btn') as HTMLButtonElement;
   const upBtn = timePanel.querySelector('.cm-up-btn') as HTMLButtonElement;
   const resetBtn = timePanel.querySelector('.cm-reset-btn') as HTMLButtonElement;
 
@@ -397,6 +400,11 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   termBtn.addEventListener('click', () => {
     termBtn.classList.toggle('active');
     callbacks.onToggleTerminators();
+  });
+
+  labelsBtn.addEventListener('click', () => {
+    labelsBtn.classList.toggle('active');
+    callbacks.onToggleLabels();
   });
 
   const flightBtn = timePanel.querySelector('.cm-flight-btn') as HTMLButtonElement;

@@ -1263,3 +1263,23 @@ canvas { display: block; }
   color: rgba(255, 255, 255, 0.85);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Body Labels ── */
+
+.cm-body-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: var(--label-color, rgba(255, 255, 255, 0.5));
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.8), 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  transform-origin: center bottom;
+  z-index: 20;
+}
