@@ -278,7 +278,7 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
       <button class="cm-follow-btn" title="Follow ghost">Follow</button>
       <button class="cm-loc-btn" title="My location">📍</button>
       <button class="cm-orbits-btn active" title="Toggle orbit rings">◯</button>
-      <button class="cm-traj-btn active" title="Toggle trajectories">∿</button>
+      <button class="cm-traj-btn" title="Toggle trajectories">∿</button>
       <button class="cm-beams-btn" title="Show all planet beams">☀</button>
       <button class="cm-term-btn" title="Toggle terminator lines">◐</button>
       <button class="cm-up-btn" title="Reference frame up">↑ Ecl</button>

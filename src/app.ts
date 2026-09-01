@@ -154,7 +154,7 @@ export class CosmicMotionApp {
   private planetOrbitsGroup!: THREE.Group;
   private hoveredBody: string | null = null;
   private showOrbits = true;
-  private showTrajectories = true;
+  private showTrajectories = false;
   private showAllBeams = false;
   private showTerminators = false;
   private earthTerminator!: THREE.LineLoop;
