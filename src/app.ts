@@ -3444,7 +3444,7 @@ export class CosmicMotionApp {
     if (!this.data) return;
 
     if (Math.abs(this.ghostOffsetHours) < 0.01) {
-      // Returning to live — restore all bodies and Sun to "now"
+      // Returning to live — restore all bodies, Sun, and orbits to "now"
       if (this.ghostGroup.visible) {
         this.needsDataUpdate = true;
         this.sunMesh.position.set(0, 0, 0);
@@ -3452,6 +3452,7 @@ export class CosmicMotionApp {
         this.sunSprite.position.set(0, 0, 0);
         this.sunGlow.position.set(0, 0, 0);
         this.sunLight.position.set(0, 0, 0);
+        this.planetOrbitsGroup.position.set(0, 0, 0);
       }
       this.ghostGroup.visible = false;
       this.earthTravelLabel.visible = false;
@@ -3482,6 +3483,9 @@ export class CosmicMotionApp {
     this.sunMesh.position.copy(drift);
     this.sunCorona.position.copy(drift);
     this.sunSprite.position.copy(drift);
+
+    // Orbit rings drift with the solar system
+    this.planetOrbitsGroup.position.copy(drift);
     this.sunGlow.position.copy(drift);
     this.sunLight.position.copy(drift);
 

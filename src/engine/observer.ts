@@ -97,18 +97,22 @@ export function computeSceneData(
   const rotationAngle = gmst(jdUTC);
 
   // Trajectory: absolute heliocentric positions with adaptive stepping
+  // Cap at ~12° of orbital arc (Earth ~0.986°/day → max ~12.2 day steps)
+  const earthMaxStep = 12 / 0.9856;
   const trajectory: TrajectoryPoint[] = [];
   const dayOffsets: number[] = [];
 
   for (let d = -daysRange; d <= daysRange;) {
     dayOffsets.push(d);
     const abs = Math.abs(d);
-    if (abs < 2) d += 0.125;
-    else if (abs < 14) d += 0.5;
-    else if (abs < 60) d += 1;
-    else if (abs < 365) d += 3;
-    else if (abs < 3650) d += 10;
-    else d += 30;
+    let step: number;
+    if (abs < 2) step = 0.125;
+    else if (abs < 14) step = 0.5;
+    else if (abs < 60) step = 1;
+    else if (abs < 365) step = 3;
+    else if (abs < 3650) step = 10;
+    else step = 30;
+    d += Math.min(step, earthMaxStep);
   }
   if (dayOffsets[dayOffsets.length - 1] < daysRange) dayOffsets.push(daysRange);
 
@@ -158,21 +162,26 @@ export function computePlanetTrajectories(
 ): PlanetTrajectory[] {
   const jd = dateToTDBJD(date);
 
-  // Build adaptive sample schedule (same as Earth's)
-  const dayOffsets: number[] = [];
-  for (let d = -daysRange; d <= daysRange;) {
-    dayOffsets.push(d);
-    const abs = Math.abs(d);
-    if (abs < 2) d += 0.125;
-    else if (abs < 14) d += 0.5;
-    else if (abs < 60) d += 1;
-    else if (abs < 365) d += 3;
-    else if (abs < 3650) d += 10;
-    else d += 30;
-  }
-  if (dayOffsets[dayOffsets.length - 1] < daysRange) dayOffsets.push(daysRange);
-
   return PLANETS.filter(p => p.name !== 'Earth').map(planet => {
+    // Per-planet stepping: cap at ~12° of orbital arc so the body
+    // always sits on the line (≥30 segments per orbit)
+    const maxStepDays = 12 / planet.meanMotionDegDay;
+
+    const dayOffsets: number[] = [];
+    for (let d = -daysRange; d <= daysRange;) {
+      dayOffsets.push(d);
+      const abs = Math.abs(d);
+      let step: number;
+      if (abs < 2) step = 0.125;
+      else if (abs < 14) step = 0.5;
+      else if (abs < 60) step = 1;
+      else if (abs < 365) step = 3;
+      else if (abs < 3650) step = 10;
+      else step = 30;
+      d += Math.min(step, maxStepDays);
+    }
+    if (dayOffsets[dayOffsets.length - 1] < daysRange) dayOffsets.push(daysRange);
+
     const points: TrajectoryPoint[] = dayOffsets.map(dayOff => {
       const { pos, r } = computePlanetPosAtJD(planet, jd + dayOff);
       return { pos, sunDist: r, dayOffset: dayOff };
