@@ -12,7 +12,7 @@ export interface UICallbacks {
   onNavigate: (bodyName: string) => void;
   onHoverBody: (bodyName: string | null) => void;
   onToggleOrbits: () => void;
-  onToggleTrajectories: () => void;
+  onToggleTrajectories: () => 'off' | 'year' | 'orbit';
   onToggleAllBeams: () => void;
   onToggleTerminators: () => void;
   onToggleLabels: () => void;
@@ -388,8 +388,12 @@ export function createUI(container: HTMLElement, callbacks: UICallbacks) {
   });
 
   trajBtn.addEventListener('click', () => {
-    trajBtn.classList.toggle('active');
-    callbacks.onToggleTrajectories();
+    const mode = callbacks.onToggleTrajectories();
+    trajBtn.classList.toggle('active', mode !== 'off');
+    trajBtn.setAttribute('data-mode', mode);
+    trajBtn.title = mode === 'off' ? 'Toggle trajectories'
+      : mode === 'year' ? 'Trajectories: ±1 year (click for full orbit)'
+      : 'Trajectories: full orbit (click to hide)';
   });
 
   beamsBtn.addEventListener('click', () => {

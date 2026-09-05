@@ -201,6 +201,7 @@ export class CosmicMotionApp {
   private hoveredBody: string | null = null;
   private showOrbits = true;
   private showTrajectories = false;
+  private trajectoryMode: 'off' | 'year' | 'orbit' = 'off';
   private showLabels = true;
   private bodyLabels = new Map<string, HTMLElement>();
   private beamInfoEl!: HTMLElement;
@@ -393,7 +394,18 @@ export class CosmicMotionApp {
         this.showOrbits = !this.showOrbits;
       },
       onToggleTrajectories: () => {
-        this.showTrajectories = !this.showTrajectories;
+        if (this.trajectoryMode === 'off') {
+          this.trajectoryMode = 'year';
+          this.showTrajectories = true;
+        } else if (this.trajectoryMode === 'year') {
+          this.trajectoryMode = 'orbit';
+          this.buildTrajectoryMeshes();
+        } else {
+          this.trajectoryMode = 'off';
+          this.showTrajectories = false;
+          this.buildTrajectoryMeshes();
+        }
+        return this.trajectoryMode;
       },
       onToggleAllBeams: () => {
         this.showAllBeams = !this.showAllBeams;
@@ -3734,6 +3746,7 @@ export class CosmicMotionApp {
     const driftPerDay = (this.data.solarGalacticSpeedKmS * 86400 / 149597870.7)
       / GALACTIC_VIS_COMPRESSION * AU_SCENE;
     const currentDayOff = this.ghostOffsetHours / 24;
+    const orbitMode = this.trajectoryMode === 'orbit';
 
     const addEntry = (
       positions: THREE.Vector3[],
@@ -3742,6 +3755,7 @@ export class CosmicMotionApp {
       futureColor: THREE.Color,
       baseOpacity: number,
       bodyName: string,
+      fadeRange: number,
     ): void => {
       if (positions.length < 2) return;
 
@@ -3752,7 +3766,7 @@ export class CosmicMotionApp {
       const material = new THREE.ShaderMaterial({
         uniforms: {
           uCurrentDayOffset: { value: currentDayOff },
-          uFadeRange: { value: 365.0 },
+          uFadeRange: { value: fadeRange },
           uPastColor: { value: pastColor },
           uFutureColor: { value: futureColor },
           uBaseOpacity: { value: baseOpacity },
@@ -3785,6 +3799,10 @@ export class CosmicMotionApp {
     };
 
     // ── Earth ──
+    const earthPlanet = PLANETS.find(p => p.name === 'Earth');
+    const earthPeriod = earthPlanet ? 360 / earthPlanet.meanMotionDegDay : 365.26;
+    const earthFade = orbitMode ? earthPeriod : 365.0;
+
     const earthPos: THREE.Vector3[] = [];
     const earthDays: number[] = [];
     for (const pt of pts) {
@@ -3794,12 +3812,17 @@ export class CosmicMotionApp {
       earthDays.push(pt.dayOffset);
     }
     addEntry(earthPos, earthDays,
-      new THREE.Color(0x9c6dff), new THREE.Color(0x00e5ff), 0.6, 'Earth');
+      new THREE.Color(0x9c6dff), new THREE.Color(0x00e5ff), 0.6, 'Earth', earthFade);
 
     // ── Sun ──
-    const daysRange = pts.length > 0 ? Math.abs(pts[pts.length - 1].dayOffset) : 365;
-    const sunExt = daysRange * 1.3;
-    const sunSteps = 300;
+    const earthDaysRange = pts.length > 0 ? Math.abs(pts[pts.length - 1].dayOffset) : 365;
+
+    // In orbit mode, extend range to cover the longest planet orbit (Neptune)
+    const maxPeriod = Math.max(...PLANETS.map(p => 360 / p.meanMotionDegDay));
+    const planetDaysRange = orbitMode ? maxPeriod : earthDaysRange;
+
+    const sunExt = (orbitMode ? planetDaysRange : earthDaysRange) * 1.3;
+    const sunSteps = orbitMode ? 600 : 300;
     const sunPos: THREE.Vector3[] = [];
     const sunDays: number[] = [];
     for (let i = -sunSteps; i <= sunSteps; i++) {
@@ -3808,11 +3831,15 @@ export class CosmicMotionApp {
       sunDays.push(d);
     }
     addEntry(sunPos, sunDays,
-      new THREE.Color(0xffa726), new THREE.Color(0xffcc00), 0.25, 'Sun');
+      new THREE.Color(0xffa726), new THREE.Color(0xffcc00), 0.25, 'Sun', 365.0);
 
     // ── Planets ──
-    const planetTrajs = computePlanetTrajectories(new Date(), daysRange);
+    const planetTrajs = computePlanetTrajectories(new Date(), planetDaysRange);
     for (const traj of planetTrajs) {
+      const planet = PLANETS.find(p => p.name === traj.name);
+      const periodDays = planet ? 360 / planet.meanMotionDegDay : 365.0;
+      const fade = orbitMode ? periodDays : 365.0;
+
       const pp: THREE.Vector3[] = [];
       const pd: number[] = [];
       for (const pt of traj.points) {
@@ -3821,7 +3848,7 @@ export class CosmicMotionApp {
         pp.push(v);
         pd.push(pt.dayOffset);
       }
-      addEntry(pp, pd, new THREE.Color(traj.color), new THREE.Color(traj.color), 0.35, traj.name);
+      addEntry(pp, pd, new THREE.Color(traj.color), new THREE.Color(traj.color), 0.35, traj.name, fade);
     }
   }
 

@@ -372,6 +372,11 @@ canvas { display: block; }
   color: var(--accent);
   background: rgba(0, 229, 255, 0.06);
 }
+.cm-traj-btn.active[data-mode="orbit"] {
+  border-color: rgba(255, 165, 0, 0.4);
+  color: #ffa726;
+  background: rgba(255, 165, 0, 0.06);
+}
 
 .cm-up-btn {
   font-family: var(--mono);
