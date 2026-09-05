@@ -1456,7 +1456,7 @@ export class CosmicMotionApp {
   }
 
   private getBodyScenePos(name: string): THREE.Vector3 {
-    if (name === 'Sun') return new THREE.Vector3(0, 0, 0);
+    if (name === 'Sun') return this.sunMesh.position.clone();
     if (name === 'Earth') return this.earthGroup.position.clone();
     if (name === 'Moon') return this.moonMesh.getWorldPosition(new THREE.Vector3());
     const group = this.planetGroups.get(name);
@@ -1501,7 +1501,8 @@ export class CosmicMotionApp {
     this.sunCorona.scale.setScalar(sunSf);
     this.sunSprite.scale.set(22 * sunSf, 22 * sunSf, 1);
     this.sunGlow.scale.set(60 * sunSf, 60 * sunSf, 1);
-    this.sunLabel.position.set(0, sunEff + Math.max(0.5, sunEff * 0.6), 0);
+    const sp = this.sunMesh.position;
+    this.sunLabel.position.set(sp.x, sp.y + sunEff + Math.max(0.5, sunEff * 0.6), sp.z);
 
     const sunGlowFade = Math.min(1, sunDist / (SUN_TRUE_R * 10));
     (this.sunSprite.material as THREE.SpriteMaterial).opacity = sunGlowFade;
@@ -2929,7 +2930,7 @@ export class CosmicMotionApp {
     }
 
     const pos = this.getBodyScenePos(name);
-    const sunDist = pos.length() / AU_SCENE;
+    const sunDist = pos.distanceTo(this.sunMesh.position) / AU_SCENE;
     const sunKm = sunDist * 149597870.7;
     const lightSec = sunKm / 299792.458;
     const lightStr = lightSec < 60 ? `${lightSec.toFixed(1)}s`
@@ -3431,6 +3432,15 @@ export class CosmicMotionApp {
     if (!this.data) return;
 
     if (Math.abs(this.ghostOffsetHours) < 0.01) {
+      // Returning to live — restore all bodies and Sun to "now"
+      if (this.ghostGroup.visible) {
+        this.needsDataUpdate = true;
+        this.sunMesh.position.set(0, 0, 0);
+        this.sunCorona.position.set(0, 0, 0);
+        this.sunSprite.position.set(0, 0, 0);
+        this.sunGlow.position.set(0, 0, 0);
+        this.sunLight.position.set(0, 0, 0);
+      }
       this.ghostGroup.visible = false;
       this.earthTravelLabel.visible = false;
       this.sunTravelLabel.visible = false;
@@ -3442,208 +3452,226 @@ export class CosmicMotionApp {
 
     this.ghostGroup.visible = true;
 
-    const ghostDate = new Date(Date.now() + this.ghostOffsetHours * 3600_000);
-    const ghostData = computeSceneData(ghostDate, 0);
+    const viewDate = new Date(Date.now() + this.ghostOffsetHours * 3600_000);
+    const viewData = computeSceneData(viewDate, 0);
 
-    // Galactic drift for ghost time offset — all bodies share this
-    const ghostGalDir = eclToThree(this.data.solarGalacticDir).normalize();
-    const ghostOffsetDays = this.ghostOffsetHours / 24;
-    const ghostDriftPerDay = (this.data.solarGalacticSpeedKmS * 86400 / 149597870.7)
-      / GALACTIC_VIS_COMPRESSION * AU_SCENE;
-    const ghostDrift = ghostGalDir.clone().multiplyScalar(ghostOffsetDays * ghostDriftPerDay);
-
-    // Update all planet positions to ghost-time positions + galactic drift
-    const ghostPlanets = computePlanetPositions(ghostDate);
-    const ghostAngles: { name: string; angle: number }[] = [];
-    const ghostOrbits: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[] = [];
-
-    for (const pp of ghostPlanets) {
-      ghostAngles.push({ name: pp.name, angle: pp.orbitAngle });
-      ghostOrbits.push({ name: pp.name, periodDays: pp.periodDays, dayInOrbit: pp.dayInOrbit, percentComplete: pp.percentComplete });
-      if (pp.name === 'Earth') continue;
-      const scenePos = eclToThree(pp.helioEcliptic).multiplyScalar(AU_SCENE).add(ghostDrift.clone());
-      const group = this.planetGroups.get(pp.name);
-      if (group) group.position.copy(scenePos);
-    }
-    const ghostMoonAngle = Math.atan2(ghostData.moonDir[1], ghostData.moonDir[0]);
-    this.ui.updateNav(ghostAngles, ghostOrbits, this.currentBody, ghostMoonAngle);
-
-    // Ghost Earth — heliocentric position + same galactic drift
-    const ghostPos = eclToThree(ghostData.earthPos).multiplyScalar(AU_SCENE).add(ghostDrift.clone());
-
-    this.ghostWorldPos.copy(ghostPos);
-    this.ghostEarth.position.copy(ghostPos);
-    this.ghostClouds.position.copy(ghostPos);
-    this.ghostAtmo.position.copy(ghostPos);
-
-    // Ghost Earth rotation (GMST at ghost time)
-    const tiltAxis = eclToThree([1, 0, 0]).normalize();
-    const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, ghostData.obliquity);
-    const spinQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), ghostData.rotationAngle,
-    );
-    const ghostQ = tiltQuat.clone().multiply(spinQuat);
-    this.ghostEarth.quaternion.copy(ghostQ);
-    this.ghostClouds.quaternion.copy(ghostQ);
-    this.ghostAtmo.quaternion.copy(tiltQuat);
-
-    // Ghost axis line + pole sweep
-    this.ghostAxisLine.position.copy(ghostPos);
-    this.ghostAxisLine.quaternion.copy(tiltQuat);
-
-    const axisLen = EARTH_R * 2.5;
-    const axisUp = new THREE.Vector3(0, axisLen, 0).applyQuaternion(tiltQuat);
-    this.ghostSweep.position.copy(ghostPos.clone().add(axisUp));
-    this.ghostSweep.quaternion.copy(tiltQuat);
-
-    // Ghost Sun direction from ghost Earth (Sun at origin)
-    const ghostSunDir = ghostPos.clone().negate().normalize();
-    (this.ghostEarth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
-    (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
-    (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
-
-    // Ghost Sun — on the Sun's galactic drift line at the ghost time offset
+    // Galactic drift
     const galDir = eclToThree(this.data.solarGalacticDir).normalize();
     const offsetDays = this.ghostOffsetHours / 24;
     const driftPerDay = (this.data.solarGalacticSpeedKmS * 86400 / 149597870.7)
       / GALACTIC_VIS_COMPRESSION * AU_SCENE;
-    this.ghostSunWorldPos.copy(galDir.clone().multiplyScalar(offsetDays * driftPerDay));
-    this.ghostSunSprite.position.copy(this.ghostSunWorldPos);
-    this.ghostSunGlow.position.copy(this.ghostSunWorldPos);
-    this.ghostSunLabel.position.copy(this.ghostSunWorldPos).add(new THREE.Vector3(0, SUN_TRUE_R + 0.5, 0));
+    const drift = galDir.clone().multiplyScalar(offsetDays * driftPerDay);
 
-    // Ghost sun beam — from ghost Earth toward ghost Sun
+    // ═══════════════════════════════════════════════════════════
+    //  PRIMARY BODIES → VIEW TIME  (solid, full-fidelity)
+    // ═══════════════════════════════════════════════════════════
+
+    // Sun → galactic drift position (same offset as all bodies)
+    this.sunMesh.position.copy(drift);
+    this.sunCorona.position.copy(drift);
+    this.sunSprite.position.copy(drift);
+    this.sunGlow.position.copy(drift);
+    this.sunLight.position.copy(drift);
+
+    // Earth → view-time position + galactic drift
+    const viewEarthPos = eclToThree(viewData.earthPos).multiplyScalar(AU_SCENE).add(drift.clone());
+    this.earthGroup.position.copy(viewEarthPos);
+
+    // Earth rotation: frozen GMST at view time (animate() skips continuous spin)
+    const tiltAxis = eclToThree([1, 0, 0]).normalize();
+    const viewTilt = new THREE.Quaternion().setFromAxisAngle(tiltAxis, viewData.obliquity);
+    const viewSpin = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), viewData.rotationAngle,
+    );
+    this.earth.quaternion.copy(viewTilt.clone().multiply(viewSpin));
+    this.clouds.quaternion.copy(viewTilt.clone().multiply(viewSpin));
+    this.atmosphere.quaternion.copy(viewTilt);
+    this.poleSweepGroup.quaternion.copy(viewTilt);
+    this.axisLine.quaternion.copy(viewTilt);
+
+    // Lighting: use heliocentric direction (drift cancels out)
+    const viewSunDir = eclToThree(viewData.earthPos).negate().normalize();
+    (this.earth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(viewSunDir);
+    (this.clouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(viewSunDir);
+    (this.atmosphere.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(viewSunDir);
+    this.orientTerminator(this.earthTerminator, viewSunDir);
+
+    // Moon → view-time direction (local to earthGroup)
+    const viewMoonDir = eclToThree(viewData.moonDir).multiplyScalar(MOON_DIST);
+    this.moonMesh.position.copy(viewMoonDir);
+    (this.moonMesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(viewSunDir);
+    this.moonTerminator.position.copy(viewMoonDir);
+    this.orientTerminator(this.moonTerminator, viewSunDir);
+
+    // Sun beam from view-time Earth to view-time Sun (drift)
     const beamArr = new Float32Array([
-      ghostPos.x, ghostPos.y, ghostPos.z,
-      this.ghostSunWorldPos.x, this.ghostSunWorldPos.y, this.ghostSunWorldPos.z,
+      viewEarthPos.x, viewEarthPos.y, viewEarthPos.z,
+      drift.x, drift.y, drift.z,
     ]);
-    this.ghostSunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
+    this.sunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(beamArr, 3));
 
-    // Ghost Moon — position relative to ghost Earth
-    const ghostMoonPos = eclToThree(ghostData.moonDir).multiplyScalar(MOON_DIST);
-    this.ghostMoon.position.copy(ghostPos).add(ghostMoonPos);
-    (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(ghostSunDir);
+    // Planets → view-time positions + lighting + beams
+    const viewPlanets = computePlanetPositions(viewDate);
+    const viewAngles: { name: string; angle: number }[] = [];
+    const viewOrbits: { name: string; periodDays: number; dayInOrbit: number; percentComplete: number }[] = [];
 
-    // Ghost Sun distance label — hugs beam underside, near ghost Earth
-    const gBeamDir = this.ghostSunWorldPos.clone().sub(ghostPos).normalize();
-    const gCamDistE = this.camera.position.distanceTo(ghostPos);
-    const gVFov = this.camera.fov * Math.PI / 180;
-    const gPx = gCamDistE * Math.tan(gVFov / 2);
-    const gBelowDir = this.beamBelowDir(gBeamDir);
-    const ghostSunMid = ghostPos.clone().add(gBeamDir.clone().multiplyScalar(gPx * 0.12));
-    ghostSunMid.add(gBelowDir.multiplyScalar(gPx * 0.032));
-    this.ghostSunDistLabel.position.copy(ghostSunMid);
-    const gSunKm = ghostData.sunDistAU * 149597870.7;
-    const gLightSec = gSunKm / 299792.458;
-    const gLightMin = Math.floor(gLightSec / 60);
-    const gLightS = Math.round(gLightSec % 60);
-    this.updateDistLabel(
-      this.ghostSunDistLabel,
-      `☉  ${(gSunKm / 1e6).toFixed(1)}M km  ·  ${gLightMin}m ${String(gLightS).padStart(2, '0')}s light`,
-      'rgba(255, 230, 160, 0.6)',
+    for (const pp of viewPlanets) {
+      viewAngles.push({ name: pp.name, angle: pp.orbitAngle });
+      viewOrbits.push({ name: pp.name, periodDays: pp.periodDays, dayInOrbit: pp.dayInOrbit, percentComplete: pp.percentComplete });
+      if (pp.name === 'Earth') continue;
+
+      const scenePos = eclToThree(pp.helioEcliptic).multiplyScalar(AU_SCENE).add(drift.clone());
+      const group = this.planetGroups.get(pp.name);
+      if (group) group.position.copy(scenePos);
+
+      // Lighting from heliocentric direction (drift-invariant)
+      const mesh = this.planetMeshes.get(pp.name);
+      if (mesh) {
+        const toSun = eclToThree(pp.helioEcliptic).negate().normalize();
+        (mesh.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
+        if (pp.name === 'Saturn') {
+          const rings = this.planetMeshes.get('SaturnRings');
+          if (rings) (rings.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(toSun);
+        }
+        const term = this.planetTerminators.get(pp.name);
+        if (term) this.orientTerminator(term, toSun);
+      }
+
+      // Planet beam to view-time Sun (drift)
+      const beam = this.planetBeams.get(pp.name);
+      if (beam) {
+        const arr = new Float32Array([
+          scenePos.x, scenePos.y, scenePos.z,
+          drift.x, drift.y, drift.z,
+        ]);
+        beam.geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      }
+    }
+
+    const viewMoonAngle = Math.atan2(viewData.moonDir[1], viewData.moonDir[0]);
+    this.ui.updateNav(viewAngles, viewOrbits, this.currentBody, viewMoonAngle);
+
+    // ═══════════════════════════════════════════════════════════
+    //  GHOST → "NOW"  (translucent anchor at present real-time)
+    // ═══════════════════════════════════════════════════════════
+
+    const nowEarthPos = eclToThree(this.data.earthPos).multiplyScalar(AU_SCENE);
+
+    // Ghost Earth at "now" position
+    this.ghostEarth.position.copy(nowEarthPos);
+    this.ghostClouds.position.copy(nowEarthPos);
+    this.ghostAtmo.position.copy(nowEarthPos);
+
+    // Ghost Earth rotation (live GMST)
+    const nowTilt = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
+    const nowSpin = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0), this.data.rotationAngle,
     );
+    this.ghostEarth.quaternion.copy(nowTilt.clone().multiply(nowSpin));
+    this.ghostClouds.quaternion.copy(nowTilt.clone().multiply(nowSpin));
+    this.ghostAtmo.quaternion.copy(nowTilt);
 
-    // Ghost Moon distance + phase label
-    const ghostMoonLabelPos = ghostPos.clone().add(ghostMoonPos);
-    ghostMoonLabelPos.y += EARTH_R * 0.7;
-    this.ghostMoonDistLabel.position.copy(ghostMoonLabelPos);
-    // Sun direction from Earth for phase = -earthPos (normalized)
-    const gSunV = new THREE.Vector3(-ghostData.earthPos[0], -ghostData.earthPos[1], -ghostData.earthPos[2]).normalize();
-    const gMoonV = new THREE.Vector3(...ghostData.moonDir);
-    const gPhaseAngle = gSunV.angleTo(gMoonV);
-    const gCross = new THREE.Vector3().crossVectors(gSunV, gMoonV);
-    const gWaxing = gCross.z > 0;
-    const gPhaseDeg = gPhaseAngle * 180 / Math.PI;
-    const gPhaseName = gPhaseDeg > 175 ? 'New' : gPhaseDeg < 5 ? 'Full'
-      : gWaxing
-        ? (gPhaseDeg > 95 ? 'Wax. Crescent' : gPhaseDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
-        : (gPhaseDeg < 85 ? 'Wan. Gibbous' : gPhaseDeg < 95 ? '3rd Quarter' : 'Wan. Crescent');
-    this.updateDistLabel(
-      this.ghostMoonDistLabel,
-      `☽  ${Math.round(ghostData.moonDistKm).toLocaleString()} km  ·  ${gPhaseName}`,
-      'rgba(220, 220, 215, 0.6)',
-    );
+    // Ghost Earth lighting from "now"
+    const nowSunDir = nowEarthPos.clone().negate().normalize();
+    (this.ghostEarth.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(nowSunDir);
+    (this.ghostClouds.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(nowSunDir);
+    (this.ghostAtmo.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(nowSunDir);
 
-    // Ghost label
-    const ghostLabelOffset = EARTH_R * 2.5 * (this.ghostGroup.visible ? (this.ghostEarth.scale.x || 1) : 1) + 0.5;
-    this.ghostLabel.position.copy(ghostPos).add(new THREE.Vector3(0, ghostLabelOffset, 0));
-    this.updateGhostLabel(ghostDate);
+    // Ghost axis + sweep at "now"
+    this.ghostAxisLine.position.copy(nowEarthPos);
+    this.ghostAxisLine.quaternion.copy(nowTilt);
+    const axisLen = EARTH_R * 2.5;
+    const axisUp = new THREE.Vector3(0, axisLen, 0).applyQuaternion(nowTilt);
+    this.ghostSweep.position.copy(nowEarthPos.clone().add(axisUp));
+    this.ghostSweep.quaternion.copy(nowTilt);
 
-    // Travel-distance labels
+    // Ghost Moon at "now"
+    const nowMoonDir = eclToThree(this.data.moonDir).multiplyScalar(MOON_DIST);
+    this.ghostMoon.position.copy(nowEarthPos).add(nowMoonDir);
+    (this.ghostMoon.material as THREE.ShaderMaterial).uniforms.sunDirection.value.copy(nowSunDir);
+
+    // Ghost Sun — "now" anchor at origin
+    this.ghostSunWorldPos.set(0, 0, 0);
+    this.ghostSunSprite.position.set(0, 0, 0);
+    this.ghostSunGlow.position.set(0, 0, 0);
+    this.ghostSunSprite.visible = true;
+    this.ghostSunGlow.visible = true;
+    this.ghostSunLabel.position.set(0, SUN_TRUE_R + 0.5, 0);
+    this.ghostSunLabel.visible = true;
+    this.ghostSunDistLabel.visible = false;
+
+    // Ghost beam from "now" Earth to "now" Sun (both at origin area)
+    const ghostBeamArr = new Float32Array([nowEarthPos.x, nowEarthPos.y, nowEarthPos.z, 0, 0, 0]);
+    this.ghostSunBeam.geometry.setAttribute('position', new THREE.BufferAttribute(ghostBeamArr, 3));
+
+    // Ghost Moon distance + phase at "now"
+    const nowMoonLabel = nowEarthPos.clone().add(nowMoonDir);
+    nowMoonLabel.y += EARTH_R * 0.7;
+    this.ghostMoonDistLabel.position.copy(nowMoonLabel);
+    const nSunV = new THREE.Vector3(-this.data.earthPos[0], -this.data.earthPos[1], -this.data.earthPos[2]).normalize();
+    const nMoonV = new THREE.Vector3(...this.data.moonDir);
+    const nPhase = nSunV.angleTo(nMoonV);
+    const nCross = new THREE.Vector3().crossVectors(nSunV, nMoonV);
+    const nWax = nCross.z > 0;
+    const nDeg = nPhase * 180 / Math.PI;
+    const nName = nDeg > 175 ? 'New' : nDeg < 5 ? 'Full'
+      : nWax ? (nDeg > 95 ? 'Wax. Crescent' : nDeg > 85 ? '1st Quarter' : 'Wax. Gibbous')
+             : (nDeg < 85 ? 'Wan. Gibbous' : nDeg < 95 ? '3rd Quarter' : 'Wan. Crescent');
+    this.updateDistLabel(this.ghostMoonDistLabel,
+      `☽  ${Math.round(this.data.moonDistKm).toLocaleString()} km  ·  ${nName}`,
+      'rgba(220, 220, 215, 0.6)');
+
+    // Ghost label — current real date at "now" position
+    const ghostLabelOff = EARTH_R * 2.5 * (this.ghostEarth.scale.x || 1) + 0.5;
+    this.ghostLabel.position.copy(nowEarthPos).add(new THREE.Vector3(0, ghostLabelOff, 0));
+    this.updateGhostLabel(new Date());
+
+    // ghostWorldPos — view-time position for camera follow
+    this.ghostWorldPos.copy(viewEarthPos);
+
+    // ═══════════════════════════════════════════════════════════
+    //  TRAVEL LABELS  (distance between "now" and view time)
+    // ═══════════════════════════════════════════════════════════
+
     const travel = this.computeTravelDistances(this.ghostOffsetHours);
-    const primaryEarthPos = this.earthGroup.position.clone();
 
-    // Earth travel label
-    const earthMid = primaryEarthPos.clone().lerp(ghostPos, 0.5);
-    const earthLineDir = ghostPos.clone().sub(primaryEarthPos).normalize();
+    // Earth travel label — between "now" ghost and view-time primary
+    const earthMid = nowEarthPos.clone().lerp(viewEarthPos, 0.5);
+    const earthLineDir = viewEarthPos.clone().sub(nowEarthPos).normalize();
     const earthPerp = new THREE.Vector3(-earthLineDir.z, 0, earthLineDir.x).normalize();
     earthMid.add(earthPerp.multiplyScalar(1.2));
     earthMid.y += 0.8;
     this.earthTravelLabel.position.copy(earthMid);
     this.earthTravelLabel.visible = true;
     const earthCamDist = this.camera.position.distanceTo(earthMid);
-    const earthScale = Math.max(4, Math.min(12, earthCamDist * 0.35));
-    this.earthTravelLabel.scale.set(earthScale, earthScale * 0.13, 1);
-    this.updateDistLabel(
-      this.earthTravelLabel,
-      `⊕ ${this.fmtTravelDist(travel.earthKm)} traveled`,
-      'rgba(130, 180, 255, 0.75)',
-    );
+    const earthLblScale = Math.max(4, Math.min(12, earthCamDist * 0.35));
+    this.earthTravelLabel.scale.set(earthLblScale, earthLblScale * 0.13, 1);
+    this.updateDistLabel(this.earthTravelLabel,
+      `⊕ ${this.fmtTravelDist(travel.earthKm)} traveled`, 'rgba(130, 180, 255, 0.75)');
 
-    // Sun travel label — midpoint along galactic drift line
-    const sunMidPt = this.ghostSunWorldPos.clone().multiplyScalar(0.5);
+    // Sun travel label
+    const sunMidPt = drift.clone().multiplyScalar(0.5);
     sunMidPt.y += 2;
     this.sunTravelLabel.position.copy(sunMidPt);
     this.sunTravelLabel.visible = true;
     const sunCamDist = this.camera.position.distanceTo(sunMidPt);
-    const sunScale = Math.max(5, Math.min(15, sunCamDist * 0.35));
-    this.sunTravelLabel.scale.set(sunScale, sunScale * 0.13, 1);
-    this.updateDistLabel(
-      this.sunTravelLabel,
-      `☉ ${this.fmtTravelDist(travel.sunKm)} traveled`,
-      'rgba(255, 220, 130, 0.75)',
-    );
+    const sunLblScale = Math.max(5, Math.min(15, sunCamDist * 0.35));
+    this.sunTravelLabel.scale.set(sunLblScale, sunLblScale * 0.13, 1);
+    this.updateDistLabel(this.sunTravelLabel,
+      `☉ ${this.fmtTravelDist(travel.sunKm)} traveled`, 'rgba(255, 220, 130, 0.75)');
 
-    // Ghost beams, distance labels, and travel labels for non-Earth planets
+    // Planet travel labels (ghost beams hidden — planets are solid at view time)
     const offsetDaysFull = this.ghostOffsetHours / 24;
-    for (const pp of ghostPlanets) {
+    for (const pp of viewPlanets) {
       if (pp.name === 'Earth') continue;
-      const planetScenePos = this.planetGroups.get(pp.name)?.position;
-      if (!planetScenePos) continue;
+      const planetPos = this.planetGroups.get(pp.name)?.position;
+      if (!planetPos) continue;
 
-      // Ghost beam from planet to ghost Sun
+      // Hide old ghost beams + distance labels (primary beams already updated above)
       const gBeam = this.planetGhostBeams.get(pp.name);
-      if (gBeam) {
-        const arr = new Float32Array([
-          planetScenePos.x, planetScenePos.y, planetScenePos.z,
-          this.ghostSunWorldPos.x, this.ghostSunWorldPos.y, this.ghostSunWorldPos.z,
-        ]);
-        gBeam.geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-        gBeam.visible = true;
-      }
-
-      // Ghost distance label
-      const gDistLabel = this.planetGhostDistLabels.get(pp.name);
-      if (gDistLabel) {
-        const gpBeamDir = planetScenePos.clone().normalize();
-        const gpCamDist = this.camera.position.distanceTo(planetScenePos);
-        const gpVFov = this.camera.fov * Math.PI / 180;
-        const gpPx = gpCamDist * Math.tan(gpVFov / 2);
-        const gpBelowDir = this.beamBelowDir(gpBeamDir);
-        const mid = planetScenePos.clone().sub(gpBeamDir.clone().multiplyScalar(gpPx * 0.12));
-        mid.add(gpBelowDir.multiplyScalar(gpPx * 0.032));
-        gDistLabel.position.copy(mid);
-        const pKm = pp.distanceAU * 149597870.7;
-        const pLightSec = pKm / 299792.458;
-        const pLightMin = Math.floor(pLightSec / 60);
-        const pLightS = Math.round(pLightSec % 60);
-        const ltStr = pLightMin > 0
-          ? `${pLightMin}m ${String(pLightS).padStart(2, '0')}s`
-          : `${pLightSec.toFixed(1)}s`;
-        const css = this.planetColorCSS(pp.name);
-        this.updateDistLabel(gDistLabel, `☉  ${(pKm / 1e6).toFixed(1)}M km  ·  ${ltStr} light`, `rgba(${css}, 0.6)`);
-        gDistLabel.visible = true;
-      }
+      if (gBeam) gBeam.visible = false;
+      const gDist = this.planetGhostDistLabels.get(pp.name);
+      if (gDist) gDist.visible = false;
 
       // Travel label
       const tLabel = this.planetTravelLabels.get(pp.name);
@@ -3653,7 +3681,7 @@ export class CosmicMotionApp {
           const travelKm = this.computePlanetTravelDist(traj.points, offsetDaysFull);
           const planet = PLANETS.find(p => p.name === pp.name);
           const sym = planet?.symbol ?? pp.name;
-          const tMid = planetScenePos.clone();
+          const tMid = planetPos.clone();
           const pMesh = this.planetMeshes.get(pp.name);
           const pVisR = pMesh ? pMesh.scale.x * (planet?.sceneRadius ?? 0.5) : 1;
           tMid.y += pVisR * 2.5 + 0.5;
@@ -3909,7 +3937,7 @@ export class CosmicMotionApp {
     const camDist = camPos.distanceTo(bodyPos);
     if (camDist < 0.01) return;
 
-    const beamDir = bodyPos.clone().negate().normalize(); // body → Sun (origin)
+    const beamDir = this.sunMesh.position.clone().sub(bodyPos).normalize(); // body → Sun
 
     // Effective visual radius — matches the reticle sizing logic
     const trueR = this.bodyTrueRadius(bodyName);
@@ -4479,22 +4507,24 @@ export class CosmicMotionApp {
       }
     }
 
-    // Earth spin animation
-    const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
-    const tiltAxis = eclToThree([1, 0, 0]).normalize();
-    const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
-    const spinQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
-    );
-    this.earth.quaternion.copy(tiltQuat).multiply(spinQuat);
+    // Earth spin animation — skip when time-traveling (rotation set by updateGhost)
+    if (Math.abs(this.ghostOffsetHours) < 0.01) {
+      const rotSpeed = (2 * Math.PI) / (23.9345 * 3600);
+      const tiltAxis = eclToThree([1, 0, 0]).normalize();
+      const tiltQuat = new THREE.Quaternion().setFromAxisAngle(tiltAxis, this.data.obliquity);
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        this.data.rotationAngle + performance.now() * 0.001 * rotSpeed,
+      );
+      this.earth.quaternion.copy(tiltQuat).multiply(spinQuat);
 
-    // Clouds spin with Earth but drift very slightly slower
-    const cloudSpinQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.data.rotationAngle + performance.now() * 0.001 * rotSpeed * 0.97,
-    );
-    this.clouds.quaternion.copy(tiltQuat).multiply(cloudSpinQuat);
+      // Clouds spin with Earth but drift very slightly slower
+      const cloudSpinQuat = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        this.data.rotationAngle + performance.now() * 0.001 * rotSpeed * 0.97,
+      );
+      this.clouds.quaternion.copy(tiltQuat).multiply(cloudSpinQuat);
+    }
 
     // Pole sweep + planet sweeps: log-mapped rotation speeds
     const earthSpeed = this.logRotationSpeed(23.9345);
@@ -4522,9 +4552,10 @@ export class CosmicMotionApp {
     if (!this.flightLocked) {
       this.updateFlightMode(delta);
     } else if (this.followGhost && this.ghostGroup.visible) {
-      const ghostDelta = this.ghostWorldPos.clone().sub(this.controls.target);
-      this.controls.target.copy(this.ghostWorldPos);
-      this.camera.position.add(ghostDelta);
+      const followTarget = this.getBodyScenePos(this.currentBody);
+      const followDelta = followTarget.clone().sub(this.controls.target);
+      this.controls.target.copy(followTarget);
+      this.camera.position.add(followDelta);
     } else if (!this.followGhost && !this.isNavigating) {
       const bodyTarget = this.getBodyScenePos(this.currentBody);
       this.controls.target.lerp(bodyTarget, 0.06);
