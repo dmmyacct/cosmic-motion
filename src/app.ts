@@ -26,6 +26,57 @@ const MOON_DIST = 2.5;
 // Compress 8× so the spiral is visible (pitch:radius ≈ 5.75:1).
 const GALACTIC_VIS_COMPRESSION = 8;
 
+// ── Trajectory fade shader ──
+// Each vertex carries its dayOffset; the shader fades alpha based on
+// distance from the current viewing time, creating "jellyfish tentacle"
+// trails that extend ~1 year in each direction from the current perspective.
+
+const TRAJECTORY_VERT = /* glsl */ `
+  attribute float aDayOffset;
+  uniform float uCurrentDayOffset;
+  uniform float uFadeRange;
+  uniform vec3 uPastColor;
+  uniform vec3 uFutureColor;
+  varying float vAlpha;
+  varying vec3 vColor;
+
+  void main() {
+    float relOffset = aDayOffset - uCurrentDayOffset;
+    float dist = abs(relOffset);
+    // Organic tentacle fade: bright near body, drops off with distance²
+    float t = clamp(dist / uFadeRange, 0.0, 1.0);
+    vAlpha = (1.0 - t) * (1.0 - t);
+
+    // Smooth blend from past to future color at current position
+    float blend = smoothstep(-15.0, 15.0, relOffset);
+    vColor = mix(uPastColor, uFutureColor, blend);
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const TRAJECTORY_FRAG = /* glsl */ `
+  varying float vAlpha;
+  varying vec3 vColor;
+  uniform float uBaseOpacity;
+
+  void main() {
+    float a = vAlpha * uBaseOpacity;
+    if (a < 0.002) discard;
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+
+interface TrajectoryEntry {
+  line: THREE.Line;
+  arrow: THREE.Mesh;
+  arrowMat: THREE.MeshBasicMaterial;
+  material: THREE.ShaderMaterial;
+  positions: THREE.Vector3[];
+  dayOffsets: number[];
+  bodyName: string;
+}
+
 // ── Perspective-faithful scaling ──
 // True proportional radii: sceneR = radiusKm / AU_KM * AU_SCENE
 // Bodies render at their real angular size from the camera's position,
@@ -85,8 +136,7 @@ export class CosmicMotionApp {
   private axisLine!: THREE.Line;
   private poleSweepGroup!: THREE.Group;
   private northSweep!: THREE.Group;
-  private trajectoryMesh!: THREE.Mesh;
-  private trajectoryForwardMesh!: THREE.Mesh;
+  private trajectoryEntries: TrajectoryEntry[] = [];
   private ghostGroup!: THREE.Group;
   private ghostEarth!: THREE.Mesh;
   private ghostClouds!: THREE.Mesh;
@@ -111,7 +161,7 @@ export class CosmicMotionApp {
   private arrowHelper!: THREE.ArrowHelper;
   private sunLabel!: THREE.Sprite;
   private sunBeam!: THREE.Line;
-  private sunDistLabel!: THREE.Sprite;
+  private sunDistLabel!: THREE.Mesh;
   private moonDistLabel!: THREE.Sprite;
   private moonOrbitLine!: THREE.Line;
   private orbitalRing!: THREE.Line;
@@ -120,11 +170,7 @@ export class CosmicMotionApp {
   private locOverlay!: HTMLElement;
   private locVisible = false;
   private _locLastUpdate = 0;
-  private trajectoryGlowPast!: THREE.Mesh;
-  private trajectoryGlowFuture!: THREE.Mesh;
-  private sunTrajectoryPast!: THREE.Mesh;
-  private sunTrajectoryFuture!: THREE.Mesh;
-  private planetTrajectoryLines: THREE.Line[] = [];
+  // (trajectory fields consolidated into trajectoryEntries above)
 
   private data!: SceneData;
   private ghostOffsetHours = 0;
@@ -165,7 +211,7 @@ export class CosmicMotionApp {
   private planetTerminators = new Map<string, THREE.LineLoop>();
 
   private planetBeams = new Map<string, THREE.Line>();
-  private planetDistLabels = new Map<string, THREE.Sprite>();
+  private planetDistLabels = new Map<string, THREE.Mesh>();
   private planetGhostBeams = new Map<string, THREE.Line>();
   private planetGhostDistLabels = new Map<string, THREE.Sprite>();
   private planetTravelLabels = new Map<string, THREE.Sprite>();
@@ -313,8 +359,7 @@ export class CosmicMotionApp {
     }));
     this.scenePivot.add(this.sunBeam);
 
-    this.sunDistLabel = this.makeDistLabel();
-    this.sunDistLabel.scale.set(8, 1, 1);
+    this.sunDistLabel = this.makeBeamPlaque();
     this.scenePivot.add(this.sunDistLabel);
 
     this.moonDistLabel = this.makeDistLabel();
@@ -2328,8 +2373,7 @@ export class CosmicMotionApp {
       this.scenePivot.add(beam);
       this.planetBeams.set(planet.name, beam);
 
-      const distLabel = this.makeDistLabel();
-      distLabel.scale.set(8, 1, 1);
+      const distLabel = this.makeBeamPlaque();
       distLabel.visible = false;
       this.scenePivot.add(distLabel);
       this.planetDistLabels.set(planet.name, distLabel);
@@ -2828,56 +2872,8 @@ export class CosmicMotionApp {
       el.style.opacity = '1';
     }
 
-    // Beam info — DOM overlay anchored below the beam line in screen space
-    const focusBody = this.currentBody;
-    if (focusBody !== 'Sun' && !this.isNavigating) {
-      const bodyPos = this.getBodyScenePos(focusBody);
-      const sunPos3 = this.sunMesh.position.clone();
-      const bScreen = bodyPos.clone().project(this.camera);
-      const sScreen = sunPos3.clone().project(this.camera);
-      if (bScreen.z < 1) {
-        const bx = (bScreen.x * 0.5 + 0.5) * w;
-        const by = (-bScreen.y * 0.5 + 0.5) * h;
-        const sx2 = (sScreen.x * 0.5 + 0.5) * w;
-        const sy2 = (-sScreen.y * 0.5 + 0.5) * h;
-
-        // Screen-space beam direction: body → Sun
-        let dx = sx2 - bx;
-        let dy = sy2 - by;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len > 0.1) { dx /= len; dy /= len; } else { dx = 1; dy = 0; }
-
-        // Perpendicular pointing screen-down, with downward bias for steep beams
-        let px = -dy;
-        let py = dx;
-        if (py < 0) { px = -px; py = -py; }
-        // When the beam is steep, the perpendicular is mostly horizontal and
-        // can flip sides. Add a downward pull so the text always stays below.
-        const steepness = Math.abs(dy) / (Math.abs(dx) + Math.abs(dy) + 0.001);
-        py += steepness * 0.8;
-        const plen = Math.sqrt(px * px + py * py);
-        px /= plen;
-        py /= plen;
-
-        // Anchor near the body, just under the beam, extending toward Sun
-        const along = 25;
-        const below = 4;
-        const ix = bx + dx * along + px * below;
-        const iy = by + dy * along + py * below;
-
-        // Align text so it extends toward the Sun along the beam
-        const sunIsRight = dx > 0;
-        this.beamInfoEl.style.textAlign = sunIsRight ? 'left' : 'right';
-        this.beamInfoEl.style.transform = sunIsRight
-          ? `translate(${ix}px, ${iy}px)`
-          : `translate(${ix}px, ${iy}px) translateX(-100%)`;
-        this.beamInfoEl.style.opacity = '1';
-      } else {
-        this.beamInfoEl.style.opacity = '0';
-      }
-    } else {
-      this.beamInfoEl.style.opacity = '0';
-    }
+    // Beam info — now handled by 3D beam plaque; DOM overlay hidden
+    this.beamInfoEl.style.opacity = '0';
   }
 
   private updateHUDContent(): void {
@@ -3325,24 +3321,13 @@ export class CosmicMotionApp {
     this.planetOrbitsGroup.position.set(0, 0, 0);
     this.planetOrbitsGroup.scale.set(AU_SCENE, AU_SCENE, AU_SCENE);
 
-    // Sun distance label — hugs the underside of the beam, right at Earth
-    const sunToEarth = earthScenePos.clone().normalize();
-    const camDistE = this.camera.position.distanceTo(earthScenePos);
-    const vFovE = this.camera.fov * Math.PI / 180;
-    const pxE = camDistE * Math.tan(vFovE / 2);
-    const sunLabelPos = earthScenePos.clone().sub(sunToEarth.clone().multiplyScalar(pxE * 0.12));
-    const belowDir = this.beamBelowDir(sunToEarth);
-    sunLabelPos.add(belowDir.multiplyScalar(pxE * 0.032));
-    this.sunDistLabel.position.copy(sunLabelPos);
+    // Sun distance label — texture update (positioning handled per-frame)
     const sunKm = this.data.sunDistAU * 149597870.7;
     const lightSec = sunKm / 299792.458;
     const lightMin = Math.floor(lightSec / 60);
     const lightS = Math.round(lightSec % 60);
     const sunInfoStr = `☉  ${(sunKm / 1e6).toFixed(1)}M km  ·  ${lightMin}m ${String(lightS).padStart(2, '0')}s light`;
-    this.updateDistLabel(this.sunDistLabel, sunInfoStr, 'rgba(255, 230, 160, 0.85)');
-    if (this.currentBody === 'Earth') {
-      this.beamInfoEl.textContent = sunInfoStr;
-    }
+    this.updateBeamPlaqueTexture(this.sunDistLabel, sunInfoStr, 'rgba(255, 230, 160, 0.85)');
 
     // Update per-planet beam lines and distance labels
     for (const pp of planetPositions) {
@@ -3358,14 +3343,6 @@ export class CosmicMotionApp {
 
       const distLabel = this.planetDistLabels.get(pp.name);
       if (distLabel) {
-        const pBeamDir = planetPos.clone().normalize();
-        const camDistP = this.camera.position.distanceTo(planetPos);
-        const vFovP = this.camera.fov * Math.PI / 180;
-        const pxP = camDistP * Math.tan(vFovP / 2);
-        const pBelowDir = this.beamBelowDir(pBeamDir);
-        const labelPos = planetPos.clone().sub(pBeamDir.clone().multiplyScalar(pxP * 0.12));
-        labelPos.add(pBelowDir.multiplyScalar(pxP * 0.032));
-        distLabel.position.copy(labelPos);
         const pKm = pp.distanceAU * 149597870.7;
         const pLightSec = pKm / 299792.458;
         const pLightMin = Math.floor(pLightSec / 60);
@@ -3374,10 +3351,7 @@ export class CosmicMotionApp {
           ? `${pLightMin}m ${String(pLightS).padStart(2, '0')}s`
           : `${pLightSec.toFixed(1)}s`;
         const pInfoStr = `☉  ${(pKm / 1e6).toFixed(1)}M km  ·  ${ltStr} light`;
-        this.updateDistLabel(distLabel, pInfoStr, 'rgba(255, 230, 160, 0.85)');
-        if (this.currentBody === pp.name) {
-          this.beamInfoEl.textContent = pInfoStr;
-        }
+        this.updateBeamPlaqueTexture(distLabel, pInfoStr, 'rgba(255, 230, 160, 0.85)');
       }
     }
 
@@ -3717,133 +3691,109 @@ export class CosmicMotionApp {
   }
 
   private buildTrajectoryMeshes(): void {
-    // Remove old trajectories
-    if (this.trajectoryMesh) { this.scenePivot.remove(this.trajectoryMesh); this.trajectoryMesh.geometry.dispose(); }
-    if (this.trajectoryForwardMesh) { this.scenePivot.remove(this.trajectoryForwardMesh); this.trajectoryForwardMesh.geometry.dispose(); }
-    if (this.trajectoryGlowPast) { this.scenePivot.remove(this.trajectoryGlowPast); this.trajectoryGlowPast.geometry.dispose(); }
-    if (this.trajectoryGlowFuture) { this.scenePivot.remove(this.trajectoryGlowFuture); this.trajectoryGlowFuture.geometry.dispose(); }
-    if (this.sunTrajectoryPast) { this.scenePivot.remove(this.sunTrajectoryPast); this.sunTrajectoryPast.geometry.dispose(); }
-    if (this.sunTrajectoryFuture) { this.scenePivot.remove(this.sunTrajectoryFuture); this.sunTrajectoryFuture.geometry.dispose(); }
+    for (const entry of this.trajectoryEntries) {
+      this.scenePivot.remove(entry.line);
+      this.scenePivot.remove(entry.arrow);
+      entry.line.geometry.dispose();
+      entry.arrow.geometry.dispose();
+      entry.arrowMat.dispose();
+      entry.material.dispose();
+    }
+    this.trajectoryEntries = [];
 
     const pts = this.data.trajectory;
-
-    // Galactic drift direction & rate (compressed for visualization).
-    // Data stays heliocentric — drift is applied only to the visual line.
     const galDir = eclToThree(this.data.solarGalacticDir).normalize();
     const driftPerDay = (this.data.solarGalacticSpeedKmS * 86400 / 149597870.7)
       / GALACTIC_VIS_COMPRESSION * AU_SCENE;
+    const currentDayOff = this.ghostOffsetHours / 24;
 
-    // Earth trajectory: heliocentric orbit + compressed galactic drift → spiral
-    const pastPts: THREE.Vector3[] = [];
-    const futurePts: THREE.Vector3[] = [];
+    const addEntry = (
+      positions: THREE.Vector3[],
+      dayOffsets: number[],
+      pastColor: THREE.Color,
+      futureColor: THREE.Color,
+      baseOpacity: number,
+      bodyName: string,
+    ): void => {
+      if (positions.length < 2) return;
 
+      const geo = new THREE.BufferGeometry().setFromPoints(positions);
+      geo.setAttribute('aDayOffset',
+        new THREE.BufferAttribute(new Float32Array(dayOffsets), 1));
+
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uCurrentDayOffset: { value: currentDayOff },
+          uFadeRange: { value: 365.0 },
+          uPastColor: { value: pastColor },
+          uFutureColor: { value: futureColor },
+          uBaseOpacity: { value: baseOpacity },
+        },
+        vertexShader: TRAJECTORY_VERT,
+        fragmentShader: TRAJECTORY_FRAG,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const line = new THREE.Line(geo, material);
+      this.scenePivot.add(line);
+
+      // One solid arrow on the trajectory, scaled with body's perspective system
+      const arrowMat = new THREE.MeshBasicMaterial({
+        color: futureColor, transparent: true, opacity: baseOpacity,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const arrow = new THREE.Mesh(
+        new THREE.ConeGeometry(0.3, 1.0, 6), arrowMat,
+      );
+      arrow.visible = false;
+      this.scenePivot.add(arrow);
+
+      this.trajectoryEntries.push({
+        line, arrow, arrowMat, material, bodyName,
+        positions: positions.map(p => p.clone()),
+        dayOffsets: dayOffsets.slice(),
+      });
+    };
+
+    // ── Earth ──
+    const earthPos: THREE.Vector3[] = [];
+    const earthDays: number[] = [];
     for (const pt of pts) {
-      const helioScene = eclToThree(pt.pos).multiplyScalar(AU_SCENE);
-      const drift = galDir.clone().multiplyScalar(pt.dayOffset * driftPerDay);
-      const v = helioScene.add(drift);
-      if (pt.dayOffset <= 0.01) pastPts.push(v.clone());
-      if (pt.dayOffset >= -0.01) futurePts.push(v);
+      const v = eclToThree(pt.pos).multiplyScalar(AU_SCENE);
+      v.add(galDir.clone().multiplyScalar(pt.dayOffset * driftPerDay));
+      earthPos.push(v);
+      earthDays.push(pt.dayOffset);
     }
+    addEntry(earthPos, earthDays,
+      new THREE.Color(0x9c6dff), new THREE.Color(0x00e5ff), 0.6, 'Earth');
 
-    if (pastPts.length >= 2) {
-      const geo = new THREE.BufferGeometry().setFromPoints(pastPts);
-      this.trajectoryMesh = new THREE.Mesh();
-      this.trajectoryGlowPast = new THREE.Mesh();
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0x9c6dff, transparent: true, opacity: 0.55,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.scenePivot.add(line);
-      this.trajectoryMesh = line as unknown as THREE.Mesh;
-    }
-
-    if (futurePts.length >= 2) {
-      const geo = new THREE.BufferGeometry().setFromPoints(futurePts);
-      this.trajectoryForwardMesh = new THREE.Mesh();
-      this.trajectoryGlowFuture = new THREE.Mesh();
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0x00e5ff, transparent: true, opacity: 0.6,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.scenePivot.add(line);
-      this.trajectoryForwardMesh = line as unknown as THREE.Mesh;
-    }
-
-    // Sun trajectory — straight line through origin in the galactic drift direction
+    // ── Sun ──
     const daysRange = pts.length > 0 ? Math.abs(pts[pts.length - 1].dayOffset) : 365;
-    const sunExtend = daysRange * 1.3;
+    const sunExt = daysRange * 1.3;
     const sunSteps = 300;
-    const sunPastPts: THREE.Vector3[] = [];
-    const sunFuturePts: THREE.Vector3[] = [];
-
+    const sunPos: THREE.Vector3[] = [];
+    const sunDays: number[] = [];
     for (let i = -sunSteps; i <= sunSteps; i++) {
-      const dayOff = (i / sunSteps) * sunExtend;
-      const p = galDir.clone().multiplyScalar(dayOff * driftPerDay);
-      if (dayOff <= 0.01) sunPastPts.push(p.clone());
-      if (dayOff >= -0.01) sunFuturePts.push(p);
+      const d = (i / sunSteps) * sunExt;
+      sunPos.push(galDir.clone().multiplyScalar(d * driftPerDay));
+      sunDays.push(d);
     }
+    addEntry(sunPos, sunDays,
+      new THREE.Color(0xffa726), new THREE.Color(0xffcc00), 0.25, 'Sun');
 
-    if (sunPastPts.length >= 2) {
-      const geo = new THREE.BufferGeometry().setFromPoints(sunPastPts);
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0xffa726, transparent: true, opacity: 0.2,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.sunTrajectoryPast = line as unknown as THREE.Mesh;
-      this.scenePivot.add(line);
-    }
-
-    if (sunFuturePts.length >= 2) {
-      const geo = new THREE.BufferGeometry().setFromPoints(sunFuturePts);
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-        color: 0xffcc00, transparent: true, opacity: 0.25,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      this.sunTrajectoryFuture = line as unknown as THREE.Mesh;
-      this.scenePivot.add(line);
-    }
-
-    // Planet trajectories — spirals for all planets (same galactic drift as Earth)
-    for (const old of this.planetTrajectoryLines) {
-      this.scenePivot.remove(old);
-      old.geometry.dispose();
-    }
-    this.planetTrajectoryLines = [];
-
+    // ── Planets ──
     const planetTrajs = computePlanetTrajectories(new Date(), daysRange);
     for (const traj of planetTrajs) {
-      const pPast: THREE.Vector3[] = [];
-      const pFuture: THREE.Vector3[] = [];
-
+      const pp: THREE.Vector3[] = [];
+      const pd: number[] = [];
       for (const pt of traj.points) {
-        const helioScene = eclToThree(pt.pos).multiplyScalar(AU_SCENE);
-        const drift = galDir.clone().multiplyScalar(pt.dayOffset * driftPerDay);
-        const v = helioScene.add(drift);
-        if (pt.dayOffset <= 0.01) pPast.push(v.clone());
-        if (pt.dayOffset >= -0.01) pFuture.push(v);
+        const v = eclToThree(pt.pos).multiplyScalar(AU_SCENE);
+        v.add(galDir.clone().multiplyScalar(pt.dayOffset * driftPerDay));
+        pp.push(v);
+        pd.push(pt.dayOffset);
       }
-
-      const color = new THREE.Color(traj.color);
-
-      if (pPast.length >= 2) {
-        const geo = new THREE.BufferGeometry().setFromPoints(pPast);
-        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-          color, transparent: true, opacity: 0.25,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }));
-        this.scenePivot.add(line);
-        this.planetTrajectoryLines.push(line);
-      }
-
-      if (pFuture.length >= 2) {
-        const geo = new THREE.BufferGeometry().setFromPoints(pFuture);
-        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
-          color, transparent: true, opacity: 0.30,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }));
-        this.scenePivot.add(line);
-        this.planetTrajectoryLines.push(line);
-      }
+      addEntry(pp, pd, new THREE.Color(traj.color), new THREE.Color(traj.color), 0.35, traj.name);
     }
   }
 
@@ -3913,6 +3863,112 @@ export class CosmicMotionApp {
     mat.map?.dispose();
     mat.map = tex;
     mat.needsUpdate = true;
+  }
+
+  // ── Beam Plaque (3D distance/light-time labels) ──
+
+  private makeBeamPlaque(): THREE.Mesh {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 128;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const geo = new THREE.PlaneGeometry(1, 0.125);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.85,
+      depthWrite: false, depthTest: false,
+      side: THREE.DoubleSide,
+    });
+    return new THREE.Mesh(geo, mat);
+  }
+
+  private updateBeamPlaqueTexture(mesh: THREE.Mesh, text: string, color = 'rgba(255,255,255,0.75)'): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = '600 44px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,1)';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = color;
+    ctx.fillText(text, 512, 64);
+    ctx.shadowBlur = 10;
+    ctx.fillText(text, 512, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = mesh.material as THREE.MeshBasicMaterial;
+    mat.map?.dispose();
+    mat.map = tex;
+    mat.needsUpdate = true;
+  }
+
+  private updateBeamPlaqueTransform(mesh: THREE.Mesh, bodyPos: THREE.Vector3, bodyName: string): void {
+    if (!mesh.visible) return;
+
+    const camPos = this.camera.position;
+    const camDist = camPos.distanceTo(bodyPos);
+    if (camDist < 0.01) return;
+
+    const beamDir = bodyPos.clone().negate().normalize(); // body → Sun (origin)
+
+    // Effective visual radius — matches the reticle sizing logic
+    const trueR = this.bodyTrueRadius(bodyName);
+    const effR = this.effectiveRadius(trueR, camDist);
+    const hasAtmo = ['Earth', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'].includes(bodyName);
+    const visR = effR * (hasAtmo ? 1.15 : 1.06);
+
+    // Scale to maintain a consistent screen-space footprint
+    const vFov = this.camera.fov * Math.PI / 180;
+    const worldH = 2 * camDist * Math.tan(vFov / 2);
+    const s = worldH * 0.18;
+    mesh.scale.set(s, s, 1);
+
+    // Position: along beam toward Sun, just outside the reticle edge
+    const gap = Math.max(visR * 0.3, worldH * 0.005);
+    const halfW = s * 0.5;
+    const plaquePos = bodyPos.clone().add(beamDir.clone().multiplyScalar(visR + gap + halfW));
+
+    // Slight "below the beam" offset so text sits under the line
+    const belowDir = this.beamBelowDir(bodyPos.clone().normalize());
+    const plaqueH = s * 0.125;
+    plaquePos.add(belowDir.multiplyScalar(plaqueH * 0.7 + worldH * 0.003));
+    mesh.position.copy(plaquePos);
+
+    // Orientation: billboard facing camera, text aligned with beam projection on screen
+    const camFwd = this.camera.getWorldDirection(new THREE.Vector3());
+    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const camRight = new THREE.Vector3().crossVectors(camFwd, camUp).normalize();
+
+    const beamSx = beamDir.dot(camRight);
+    const beamSy = beamDir.dot(camUp);
+
+    // Keep text reading left-to-right on screen
+    let bx = beamSx, by = beamSy;
+    if (bx < 0) { bx = -bx; by = -by; }
+    const angle = Math.atan2(by, bx);
+
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const right = camRight.clone().multiplyScalar(cos).add(camUp.clone().multiplyScalar(sin));
+    const up = camRight.clone().multiplyScalar(-sin).add(camUp.clone().multiplyScalar(cos));
+    const normal = camFwd.clone().negate();
+
+    const m4 = new THREE.Matrix4().makeBasis(right, up, normal);
+    mesh.quaternion.setFromRotationMatrix(m4);
+
+    // Angle-aware fade: dim when looking along the beam (edge-on / behind body)
+    const viewDot = Math.abs(camFwd.dot(beamDir));
+    const fadeStart = 0.65;
+    const fadeEnd = 0.92;
+    const t = Math.max(0, Math.min(1, (viewDot - fadeStart) / (fadeEnd - fadeStart)));
+    const angleFade = 1 - t * t;
+
+    // Body-fill fade: dim when the body nearly fills the viewport
+    const bodyFill = visR * 2 / worldH;
+    let fillFade = 1;
+    if (bodyFill > 1.5) fillFade = 0;
+    else if (bodyFill > 1.0) fillFade = 1 - (bodyFill - 1.0) / 0.5;
+
+    (mesh.material as THREE.MeshBasicMaterial).opacity = angleFade * fillFade * 0.85;
   }
 
   // ── Flight Mode ──
@@ -4151,15 +4207,66 @@ export class CosmicMotionApp {
       (line.material as THREE.LineBasicMaterial).opacity = baseLine * orbitFade;
     }
     (this.moonOrbitLine.material as THREE.LineBasicMaterial).opacity = this.showOrbits ? 0.1 * orbitFade : 0;
-    // Trajectory visibility toggle
+    // Trajectory visibility + fade + arrow placement
     const trajVis = this.showTrajectories;
-    if (this.trajectoryMesh) this.trajectoryMesh.visible = trajVis;
-    if (this.trajectoryForwardMesh) this.trajectoryForwardMesh.visible = trajVis;
-    if (this.trajectoryGlowPast) this.trajectoryGlowPast.visible = trajVis;
-    if (this.trajectoryGlowFuture) this.trajectoryGlowFuture.visible = trajVis;
-    if (this.sunTrajectoryPast) this.sunTrajectoryPast.visible = trajVis;
-    if (this.sunTrajectoryFuture) this.sunTrajectoryFuture.visible = trajVis;
-    for (const line of this.planetTrajectoryLines) line.visible = trajVis;
+    const currentDayOffset = this.ghostOffsetHours / 24;
+    const halfTan = Math.tan(this.camera.fov * Math.PI / 360);
+    const viewH = this.renderer.domElement.clientHeight;
+    const _bw = new THREE.Vector3();
+    for (const entry of this.trajectoryEntries) {
+      entry.line.visible = trajVis;
+      entry.material.uniforms.uCurrentDayOffset.value = currentDayOffset;
+
+      if (!trajVis) { entry.arrow.visible = false; continue; }
+
+      // Resolve body world position + true scene radius
+      let trueR = 0;
+      if (entry.bodyName === 'Earth') {
+        this.earthGroup.getWorldPosition(_bw);
+        trueR = PLANETS.find(p => p.name === 'Earth')!.radiusKm / AU_KM_VAL * AU_SCENE;
+      } else if (entry.bodyName === 'Sun') {
+        this.scenePivot.getWorldPosition(_bw);
+        trueR = SUN_TRUE_R;
+      } else {
+        const g = this.planetGroups.get(entry.bodyName);
+        if (!g) { entry.arrow.visible = false; continue; }
+        g.getWorldPosition(_bw);
+        const pl = PLANETS.find(p => p.name === entry.bodyName);
+        trueR = pl ? pl.radiusKm / AU_KM_VAL * AU_SCENE : 0.001;
+      }
+
+      const bodyDist = this.camera.position.distanceTo(_bw);
+      const effR = this.effectiveRadius(trueR, bodyDist);
+
+      // Arrow scales with body — hide when arrow would be < 2 px
+      const arrowSize = effR * 0.4;
+      const arrowPx = (arrowSize / bodyDist) * viewH / (2 * halfTan);
+      if (arrowPx < 2) { entry.arrow.visible = false; continue; }
+      entry.arrow.visible = true;
+      entry.arrow.scale.setScalar(arrowSize);
+
+      // Tangent from trajectory at current time
+      const { positions: ep, dayOffsets: ed } = entry;
+      const cDay = Math.max(ed[0], Math.min(ed[ed.length - 1], currentDayOffset));
+      let lo = 0, hi = ed.length - 1;
+      while (lo < hi - 1) {
+        const m = (lo + hi) >> 1;
+        if (ed[m] <= cDay) lo = m; else hi = m;
+      }
+      const tangent = ep[hi].clone().sub(ep[lo]).normalize();
+
+      // Position at body + just past its visual edge along tangent
+      if (entry.bodyName === 'Earth') {
+        entry.arrow.position.copy(this.earthGroup.position);
+      } else if (entry.bodyName === 'Sun') {
+        entry.arrow.position.set(0, 0, 0);
+      } else {
+        const g = this.planetGroups.get(entry.bodyName);
+        if (g) entry.arrow.position.copy(g.position);
+      }
+      entry.arrow.position.addScaledVector(tangent, effR * 1.5);
+      entry.arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+    }
 
     // Terminator line visibility
     this.earthTerminator.visible = this.showTerminators;
@@ -4175,10 +4282,10 @@ export class CosmicMotionApp {
     // Sun label — hide when focused on the Sun
     this.sunLabel.visible = focusedBody !== 'Sun';
 
-    // Earth beam/labels — hide 3D sprite label when DOM overlay is active
+    // Earth beam/labels — beam plaque handles its own fade
     const earthShow = focusedBody === 'Earth' || this.showAllBeams;
     this.sunBeam.visible = earthShow;
-    this.sunDistLabel.visible = earthShow && focusedBody !== 'Earth';
+    this.sunDistLabel.visible = earthShow;
     this.ghostSunBeam.visible = earthShow;
     this.ghostSunDistLabel.visible = earthShow;
     if (ghostActive) {
@@ -4196,7 +4303,7 @@ export class CosmicMotionApp {
       const beamMat = beam.material as THREE.LineBasicMaterial;
       beamMat.opacity = focusedBody === name ? 0.35 : 0.12;
       const dl = this.planetDistLabels.get(name);
-      if (dl) dl.visible = show && focusedBody !== name;
+      if (dl) dl.visible = show;
 
       if (ghostActive) {
         const gb = this.planetGhostBeams.get(name);
@@ -4221,14 +4328,19 @@ export class CosmicMotionApp {
       this.sunDistLabel.visible = false;
     }
 
-    // Adaptive label scaling — keeps distance labels readable at any zoom
-    this.scaleDistLabel(this.sunDistLabel);
+    // Beam plaque transforms — position, orient, scale, and fade per frame
+    this.updateBeamPlaqueTransform(this.sunDistLabel, this.earthGroup.position, 'Earth');
+    for (const [name, dl] of this.planetDistLabels) {
+      const pos = this.planetGroups.get(name)?.position;
+      if (pos) this.updateBeamPlaqueTransform(dl, pos, name);
+    }
+
+    // Adaptive sprite scaling for remaining labels
     this.scaleDistLabel(this.moonDistLabel);
     this.scaleDistLabel(this.ghostSunDistLabel);
     this.scaleDistLabel(this.ghostMoonDistLabel);
     this.scaleDistLabel(this.earthTravelLabel);
     this.scaleDistLabel(this.sunTravelLabel);
-    for (const l of this.planetDistLabels.values()) this.scaleDistLabel(l);
     for (const l of this.planetGhostDistLabels.values()) this.scaleDistLabel(l);
     for (const l of this.planetTravelLabels.values()) this.scaleDistLabel(l);
 

@@ -1,7 +1,5 @@
-Earth drill-down navigation — hover to explore Moon via nav widget
+Set initial camera to HDG 135.5 PIT -12.7 near Earth
 
-Hold hover on Earth's orbit ring in the nav widget for 800ms to enter
-drill-down mode: Earth animates to center, Moon orbit appears with a
-clickable Moon dot. Click Moon to fly the camera there with full HUD
-support. Return via Earth center click, back label, Escape, or mouse
-leave. Smooth choreographed transitions throughout.
+Compute the starting camera offset from Earth's position using
+the desired heading and pitch so the view is consistent regardless
+of the current date's orbital geometry.
