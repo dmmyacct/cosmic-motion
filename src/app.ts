@@ -4578,12 +4578,13 @@ export class CosmicMotionApp {
 
     if (!this.flightLocked) {
       this.updateFlightMode(delta);
-    } else if (this.followGhost && this.ghostGroup.visible) {
+    } else if (this.ghostGroup.visible) {
+      // Time-traveling: camera snaps with the focused body at view time
       const followTarget = this.getBodyScenePos(this.currentBody);
       const followDelta = followTarget.clone().sub(this.controls.target);
       this.controls.target.copy(followTarget);
       this.camera.position.add(followDelta);
-    } else if (!this.followGhost && !this.isNavigating) {
+    } else if (!this.isNavigating) {
       const bodyTarget = this.getBodyScenePos(this.currentBody);
       this.controls.target.lerp(bodyTarget, 0.06);
     }
